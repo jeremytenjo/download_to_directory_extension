@@ -316,6 +316,35 @@
     }
   }
 
+  function formatApiError(status, data, fallbackMessage) {
+    const raw = String(data?.reason || data?.error || '').trim();
+    const msg = raw.toLowerCase();
+
+    if (status === 409) {
+      return 'A file with that name already exists. Enable "Overwrite existing file" or choose a different filename/subdirectory.';
+    }
+    if (status === 400 && msg.includes('private or localhost')) {
+      return 'This URL points to a private/local address, which is blocked for safety.';
+    }
+    if (status === 400 && msg.includes('only http/https')) {
+      return 'Only HTTP/HTTPS links are supported.';
+    }
+    if (msg.includes('certificate verify failed')) {
+      return 'Secure connection failed while validating the site certificate. Install/update certificates in your Python environment and try again.';
+    }
+    if (msg.includes('timed out')) {
+      return 'The download timed out. Please retry or try a different source.';
+    }
+    if (status === 404) {
+      return 'The file could not be found at that URL (404).';
+    }
+    if (status >= 500) {
+      return 'Server error while downloading. Check ComfyUI logs for details and try again.';
+    }
+
+    return raw || fallbackMessage || `Request failed (${status})`;
+  }
+
   async function loadRoots() {
     const select = document.getElementById('dtd-root');
     if (!select) return;
@@ -327,7 +356,11 @@
 
     if (!resp.ok) {
       throw new Error(
-        data?.error || data?.reason || `Failed to load roots (${resp.status})`,
+        formatApiError(
+          resp.status,
+          data,
+          `Could not load destination folders (${resp.status})`,
+        ),
       );
     }
 
@@ -383,7 +416,7 @@
 
     if (!resp.ok) {
       setStatus(
-        data?.error || data?.reason || `Download failed (${resp.status})`,
+        formatApiError(resp.status, data, `Download failed (${resp.status})`),
         'error',
       );
       return;
