@@ -6,6 +6,9 @@
     apiPrefix: "/api",
     roots: [],
   };
+  const DEFAULT_TOP = 16;
+  const DEFAULT_RIGHT = 16;
+  const GAP = 8;
 
   function ensureStyles() {
     if (document.getElementById("download-to-directory-style")) return;
@@ -112,6 +115,47 @@
     if (!status) return;
     status.className = `status ${type}`.trim();
     status.textContent = message;
+  }
+
+  function findExtensionsButton() {
+    const candidates = document.querySelectorAll("button,[role='button']");
+    for (const el of candidates) {
+      const text = (el.textContent || "").trim();
+      if (text === "Extensions") return el;
+    }
+    return null;
+  }
+
+  function positionUi() {
+    const toggle = document.getElementById(BUTTON_ID);
+    const panel = document.getElementById(PANEL_ID);
+    if (!toggle || !panel) return;
+
+    const extBtn = findExtensionsButton();
+    if (!extBtn) {
+      toggle.style.right = `${DEFAULT_RIGHT}px`;
+      toggle.style.top = `${DEFAULT_TOP}px`;
+      toggle.style.left = "auto";
+      panel.style.right = `${DEFAULT_RIGHT}px`;
+      panel.style.top = "56px";
+      panel.style.left = "auto";
+      return;
+    }
+
+    const extRect = extBtn.getBoundingClientRect();
+    const left = Math.round(extRect.right + GAP);
+    const top = Math.round(extRect.top);
+
+    toggle.style.left = `${left}px`;
+    toggle.style.top = `${top}px`;
+    toggle.style.right = "auto";
+
+    const panelTop = Math.round(extRect.bottom + GAP);
+    const maxLeft = Math.max(8, window.innerWidth - panel.offsetWidth - 8);
+    const panelLeft = Math.min(left, maxLeft);
+    panel.style.left = `${panelLeft}px`;
+    panel.style.top = `${panelTop}px`;
+    panel.style.right = "auto";
   }
 
   async function loadRoots() {
@@ -240,6 +284,11 @@
         handleDownload().catch((err) => setStatus(err.message || String(err), "error"));
       });
     }
+
+    positionUi();
+    window.addEventListener("resize", positionUi);
+    const observer = new MutationObserver(() => positionUi());
+    observer.observe(document.body, { childList: true, subtree: true });
   }
 
   function init() {
