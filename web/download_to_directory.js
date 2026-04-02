@@ -370,7 +370,8 @@
     for (const root of state.roots) {
       const opt = document.createElement('option');
       opt.value = root.key;
-      opt.textContent = `${root.key} -> ${root.path}`;
+      opt.textContent = root.key;
+      opt.title = root.path;
       select.appendChild(opt);
     }
 
