@@ -21,13 +21,42 @@ NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
 
 
+def _iter_subdirectories(base_path: str) -> list[str]:
+    if not os.path.isdir(base_path):
+        return []
+
+    discovered: list[str] = []
+    for dirpath, dirnames, _filenames in os.walk(base_path, topdown=True):
+        # Skip hidden/cache folders to keep the UI list useful.
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d != "__pycache__"]
+        dirnames.sort(key=str.lower)
+        for dirname in dirnames:
+            discovered.append(os.path.abspath(os.path.join(dirpath, dirname)))
+
+    discovered.sort(key=str.lower)
+    return discovered
+
+
+def _add_subroots(roots: dict[str, str], key_prefix: str, base_path: str) -> None:
+    abs_base = os.path.abspath(base_path)
+    roots[key_prefix] = abs_base
+    for subdir_path in _iter_subdirectories(abs_base):
+        rel = os.path.relpath(subdir_path, abs_base).replace(os.sep, "/")
+        roots[f"{key_prefix}/{rel}"] = subdir_path
+
+
 def _build_root_map() -> dict[str, str]:
     roots: dict[str, str] = {
         "input": os.path.abspath(folder_paths.get_input_directory()),
         "output": os.path.abspath(folder_paths.get_output_directory()),
-        "models": os.path.abspath(folder_paths.models_dir),
         "user": os.path.abspath(folder_paths.get_user_directory()),
     }
+
+    _add_subroots(roots, "models", folder_paths.models_dir)
+
+    for index, custom_nodes_dir in enumerate(folder_paths.get_folder_paths("custom_nodes")):
+        key_prefix = "custom_nodes" if index == 0 else f"custom_nodes_{index + 1}"
+        _add_subroots(roots, key_prefix, custom_nodes_dir)
 
     # Add a dedicated download area under the user directory for a safe default.
     user_downloads = os.path.join(roots["user"], "downloads")
