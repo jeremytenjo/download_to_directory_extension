@@ -299,6 +299,13 @@
       close.addEventListener("click", () => dialog.close());
     }
 
+    // Close when clicking the dialog backdrop (outside modal content).
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) {
+        dialog.close();
+      }
+    });
+
     const observer = new MutationObserver(() => ensureButtonMounted());
     observer.observe(document.body, { childList: true, subtree: true });
   }
