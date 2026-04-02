@@ -57,7 +57,7 @@ def _build_root_map() -> dict[str, str]:
 
     for index, custom_nodes_dir in enumerate(folder_paths.get_folder_paths("custom_nodes")):
         key_prefix = "custom_nodes" if index == 0 else f"custom_nodes_{index + 1}"
-        _add_subroots(roots, key_prefix, custom_nodes_dir)
+        roots[key_prefix] = os.path.abspath(custom_nodes_dir)
 
     # Add a dedicated download area under the user directory for a safe default.
     user_downloads = os.path.join(roots["user"], "downloads")
