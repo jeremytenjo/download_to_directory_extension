@@ -20,7 +20,7 @@
         right: 16px;
         top: 16px;
         z-index: 9999;
-        padding: 8px 12px;
+        padding: 8px 18px;
         border: 1px solid #4c4c4c;
         border-radius: 10px;
         background: #1a1a1a;
