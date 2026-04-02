@@ -1,40 +1,50 @@
 (() => {
-  const DIALOG_ID = "download-to-directory-dialog";
-  const BUTTON_ID = "download-to-directory-button";
+  const DIALOG_ID = 'download-to-directory-dialog';
+  const BUTTON_ID = 'download-to-directory-button';
 
   const state = {
-    apiPrefix: "/api",
+    apiPrefix: '/api',
     roots: [],
     toggleEl: null,
     dialogEl: null,
   };
 
   function ensureStyles() {
-    if (document.getElementById("download-to-directory-style")) return;
+    if (document.getElementById('download-to-directory-style')) return;
 
-    const style = document.createElement("style");
-    style.id = "download-to-directory-style";
+    const style = document.createElement('style');
+    style.id = 'download-to-directory-style';
     style.textContent = `
       #download-to-directory-inline-slot {
         display: inline-flex;
         align-items: center;
-        margin-left: 8px;
       }
       #${BUTTON_ID} {
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        gap: 8px;
         height: 32px;
-        padding: 8px 18px;
-        border: 1px solid #4c4c4c;
-        border-radius: 10px;
-        background: #1a1a1a;
-        color: #f4f4f4;
+        padding: 8px 12px;
+        border: none;
+        border-radius: 8px;
+        background: var(--p-surface-800, #23262f);
+        color: var(--p-surface-0, #fff);
         font-size: 12px;
+        font-weight: 500;
+        line-height: 1;
         cursor: pointer;
+        font-family: inherit;
+        white-space: nowrap;
+        transition: background 120ms ease;
       }
       #${BUTTON_ID}:hover {
-        background: #222;
+        background: var(--interface-button-hover-surface, #2f3340);
+      }
+      #${BUTTON_ID} i {
+        width: 16px;
+        height: 16px;
+        font-size: 16px;
       }
       #${DIALOG_ID} {
         width: min(440px, calc(100vw - 24px));
@@ -101,7 +111,7 @@
   }
 
   async function apiFetch(path, options) {
-    const prefixes = [state.apiPrefix, "", "/api"];
+    const prefixes = [state.apiPrefix, '', '/api'];
     let lastError = null;
 
     for (const prefix of prefixes) {
@@ -116,10 +126,10 @@
       }
     }
 
-    throw lastError || new Error("Unable to reach ComfyUI API");
+    throw lastError || new Error('Unable to reach ComfyUI API');
   }
 
-  function setStatus(message, type = "") {
+  function setStatus(message, type = '') {
     const status = document.querySelector(`#${DIALOG_ID} .status`);
     if (!status) return;
     status.className = `status ${type}`.trim();
@@ -127,12 +137,16 @@
   }
 
   function findActionbarMountNode() {
-    const content = document.querySelector(".actionbar [data-pc-section='content']");
+    const content = document.querySelector(
+      ".actionbar [data-pc-section='content']",
+    );
     if (content) {
-      const inlineRow = content.querySelector(".relative.flex.items-center.gap-2.select-none");
+      const inlineRow = content.querySelector(
+        '.relative.flex.items-center.gap-2.select-none',
+      );
       return inlineRow || content;
     }
-    return document.querySelector(".actionbar .p-panel-content");
+    return document.querySelector('.actionbar .p-panel-content');
   }
 
   function ensureButtonMounted() {
@@ -142,10 +156,10 @@
     const mountNode = findActionbarMountNode();
     if (!mountNode) return;
 
-    let slot = document.getElementById("download-to-directory-inline-slot");
+    let slot = document.getElementById('download-to-directory-inline-slot');
     if (!slot) {
-      slot = document.createElement("div");
-      slot.id = "download-to-directory-inline-slot";
+      slot = document.createElement('div');
+      slot.id = 'download-to-directory-inline-slot';
     }
 
     if (slot.parentElement !== mountNode) {
@@ -158,91 +172,100 @@
   }
 
   async function loadRoots() {
-    const select = document.getElementById("dtd-root");
+    const select = document.getElementById('dtd-root');
     if (!select) return;
 
-    setStatus("Loading destination roots...");
+    setStatus('Loading destination roots...');
 
-    const resp = await apiFetch("/download-to-dir/roots", { method: "GET" });
+    const resp = await apiFetch('/download-to-dir/roots', { method: 'GET' });
     const data = await resp.json();
 
     if (!resp.ok) {
-      throw new Error(data?.error || data?.reason || `Failed to load roots (${resp.status})`);
+      throw new Error(
+        data?.error || data?.reason || `Failed to load roots (${resp.status})`,
+      );
     }
 
     state.roots = Array.isArray(data.roots) ? data.roots : [];
 
-    select.innerHTML = "";
+    select.innerHTML = '';
     for (const root of state.roots) {
-      const opt = document.createElement("option");
+      const opt = document.createElement('option');
       opt.value = root.key;
       opt.textContent = `${root.key} -> ${root.path}`;
       select.appendChild(opt);
     }
 
     if (select.options.length === 0) {
-      setStatus("No writable roots available", "error");
+      setStatus('No writable roots available', 'error');
     } else {
-      setStatus("Ready.");
+      setStatus('Ready.');
     }
   }
 
   async function handleDownload() {
-    const urlInput = document.getElementById("dtd-url");
-    const rootInput = document.getElementById("dtd-root");
-    const subdirInput = document.getElementById("dtd-subdir");
-    const filenameInput = document.getElementById("dtd-filename");
-    const overwriteInput = document.getElementById("dtd-overwrite");
+    const urlInput = document.getElementById('dtd-url');
+    const rootInput = document.getElementById('dtd-root');
+    const subdirInput = document.getElementById('dtd-subdir');
+    const filenameInput = document.getElementById('dtd-filename');
+    const overwriteInput = document.getElementById('dtd-overwrite');
 
-    const url = (urlInput?.value || "").trim();
-    const rootKey = (rootInput?.value || "").trim();
+    const url = (urlInput?.value || '').trim();
+    const rootKey = (rootInput?.value || '').trim();
 
     if (!url || !rootKey) {
-      setStatus("URL and root are required.", "error");
+      setStatus('URL and root are required.', 'error');
       return;
     }
 
-    setStatus("Downloading... This may take a while.");
+    setStatus('Downloading... This may take a while.');
 
     const payload = {
       url,
       root_key: rootKey,
-      subdirectory: (subdirInput?.value || "").trim(),
-      filename: (filenameInput?.value || "").trim(),
+      subdirectory: (subdirInput?.value || '').trim(),
+      filename: (filenameInput?.value || '').trim(),
       overwrite: Boolean(overwriteInput?.checked),
     };
 
-    const resp = await apiFetch("/download-to-dir", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const resp = await apiFetch('/download-to-dir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
 
     const data = await resp.json().catch(() => ({}));
 
     if (!resp.ok) {
-      setStatus(data?.error || data?.reason || `Download failed (${resp.status})`, "error");
+      setStatus(
+        data?.error || data?.reason || `Download failed (${resp.status})`,
+        'error',
+      );
       return;
     }
 
     const mb = Number(data.bytes_written || 0) / (1024 * 1024);
-    setStatus(`Saved to ${data.destination_path} (${mb.toFixed(2)} MB)`, "success");
+    setStatus(
+      `Saved to ${data.destination_path} (${mb.toFixed(2)} MB)`,
+      'success',
+    );
   }
 
   function renderUi() {
     ensureStyles();
 
     if (!state.toggleEl) {
-      const toggle = document.createElement("button");
+      const toggle = document.createElement('button');
       toggle.id = BUTTON_ID;
-      toggle.type = "button";
-      toggle.textContent = "Downloader";
+      toggle.type = 'button';
+      toggle.innerHTML =
+        '<i class="icon-[lucide--download]"></i><span>Downloader</span>';
       state.toggleEl = toggle;
     }
     const toggle = state.toggleEl;
 
     if (!state.dialogEl) {
-      const dialog = document.createElement("dialog");
+      const dialog = document.createElement('dialog');
       dialog.id = DIALOG_ID;
       dialog.innerHTML = `
       <div class="row">
@@ -276,31 +299,35 @@
     }
     const dialog = state.dialogEl;
 
-    toggle.addEventListener("click", () => {
+    toggle.addEventListener('click', () => {
       if (!dialog.open) {
         dialog.showModal();
       }
       if (state.roots.length === 0) {
-        loadRoots().catch((err) => setStatus(err.message || String(err), "error"));
+        loadRoots().catch((err) =>
+          setStatus(err.message || String(err), 'error'),
+        );
       }
     });
 
     ensureButtonMounted();
 
-    const submit = document.getElementById("dtd-submit");
+    const submit = document.getElementById('dtd-submit');
     if (submit) {
-      submit.addEventListener("click", () => {
-        handleDownload().catch((err) => setStatus(err.message || String(err), "error"));
+      submit.addEventListener('click', () => {
+        handleDownload().catch((err) =>
+          setStatus(err.message || String(err), 'error'),
+        );
       });
     }
 
-    const close = document.getElementById("dtd-close");
+    const close = document.getElementById('dtd-close');
     if (close) {
-      close.addEventListener("click", () => dialog.close());
+      close.addEventListener('click', () => dialog.close());
     }
 
     // Close when clicking the dialog backdrop (outside modal content).
-    dialog.addEventListener("click", (event) => {
+    dialog.addEventListener('click', (event) => {
       if (event.target === dialog) {
         dialog.close();
       }
@@ -319,8 +346,8 @@
     renderUi();
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
   }
