@@ -1,25 +1,19 @@
 (() => {
-  const PANEL_ID = "download-to-directory-panel";
+  const DIALOG_ID = "download-to-directory-dialog";
   const BUTTON_ID = "download-to-directory-button";
 
   const state = {
     apiPrefix: "/api",
     roots: [],
   };
-  const DEFAULT_TOP = 16;
-  const DEFAULT_RIGHT = 16;
-  const GAP = 8;
 
   function ensureStyles() {
     if (document.getElementById("download-to-directory-style")) return;
+
     const style = document.createElement("style");
     style.id = "download-to-directory-style";
     style.textContent = `
       #${BUTTON_ID} {
-        position: fixed;
-        right: 16px;
-        top: 16px;
-        z-index: 9999;
         padding: 8px 18px;
         border: 1px solid #4c4c4c;
         border-radius: 10px;
@@ -28,27 +22,23 @@
         font-size: 12px;
         cursor: pointer;
       }
-      #${PANEL_ID} {
-        position: fixed;
-        right: 16px;
-        top: 56px;
-        z-index: 9999;
-        width: 380px;
-        max-width: calc(100vw - 32px);
-        padding: 12px;
+      #${BUTTON_ID}:hover {
+        background: #222;
+      }
+      #${DIALOG_ID} {
+        width: min(440px, calc(100vw - 24px));
         border: 1px solid #4c4c4c;
-        border-radius: 10px;
+        border-radius: 12px;
         background: #111;
         color: #f4f4f4;
-        font-size: 12px;
-        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+        padding: 12px;
       }
-      #${PANEL_ID}[hidden] {
-        display: none;
+      #${DIALOG_ID}::backdrop {
+        background: rgba(0, 0, 0, 0.45);
       }
-      #${PANEL_ID} input,
-      #${PANEL_ID} select,
-      #${PANEL_ID} button {
+      #${DIALOG_ID} input,
+      #${DIALOG_ID} select,
+      #${DIALOG_ID} button {
         width: 100%;
         box-sizing: border-box;
         margin-top: 6px;
@@ -57,37 +47,45 @@
         border: 1px solid #4c4c4c;
         background: #191919;
         color: #f4f4f4;
-        padding: 7px;
+        padding: 8px;
       }
-      #${PANEL_ID} .row {
+      #${DIALOG_ID} .row {
         display: grid;
         grid-template-columns: 1fr;
         gap: 6px;
       }
-      #${PANEL_ID} .status {
+      #${DIALOG_ID} .status {
         margin-top: 8px;
         min-height: 18px;
       }
-      #${PANEL_ID} .status.error {
+      #${DIALOG_ID} .status.error {
         color: #ff8e8e;
       }
-      #${PANEL_ID} .status.success {
+      #${DIALOG_ID} .status.success {
         color: #9df5b3;
       }
-      #${PANEL_ID} .hint {
+      #${DIALOG_ID} .hint {
         opacity: 0.75;
         font-size: 11px;
       }
-      #${PANEL_ID} .inline {
+      #${DIALOG_ID} .inline {
         display: flex;
         align-items: center;
         gap: 8px;
       }
-      #${PANEL_ID} .inline input[type="checkbox"] {
+      #${DIALOG_ID} .inline input[type="checkbox"] {
         width: auto;
         margin: 0;
       }
+      #${DIALOG_ID} .actions {
+        display: flex;
+        gap: 8px;
+      }
+      #${DIALOG_ID} .actions button {
+        margin-bottom: 0;
+      }
     `;
+
     document.head.appendChild(style);
   }
 
@@ -111,7 +109,7 @@
   }
 
   function setStatus(message, type = "") {
-    const status = document.querySelector(`#${PANEL_ID} .status`);
+    const status = document.querySelector(`#${DIALOG_ID} .status`);
     if (!status) return;
     status.className = `status ${type}`.trim();
     status.textContent = message;
@@ -126,36 +124,39 @@
     return null;
   }
 
-  function positionUi() {
+  function findHeaderMountNode() {
+    const extBtn = findExtensionsButton();
+    if (!extBtn) return null;
+
+    return (
+      extBtn.closest("[data-pc-section='content']") ||
+      extBtn.parentElement ||
+      null
+    );
+  }
+
+  function mountButtonNearExtensions() {
     const toggle = document.getElementById(BUTTON_ID);
-    const panel = document.getElementById(PANEL_ID);
-    if (!toggle || !panel) return;
+    if (!toggle) return;
 
     const extBtn = findExtensionsButton();
-    if (!extBtn) {
-      toggle.style.right = `${DEFAULT_RIGHT}px`;
-      toggle.style.top = `${DEFAULT_TOP}px`;
-      toggle.style.left = "auto";
-      panel.style.right = `${DEFAULT_RIGHT}px`;
-      panel.style.top = "56px";
-      panel.style.left = "auto";
+    const mountNode = findHeaderMountNode();
+
+    if (!mountNode || !extBtn) {
+      if (toggle.parentElement !== document.body) {
+        document.body.appendChild(toggle);
+      }
       return;
     }
 
-    const extRect = extBtn.getBoundingClientRect();
-    const left = Math.round(extRect.right + GAP);
-    const top = Math.round(extRect.top);
+    if (toggle.parentElement !== mountNode) {
+      mountNode.insertBefore(toggle, extBtn.nextSibling);
+      return;
+    }
 
-    toggle.style.left = `${left}px`;
-    toggle.style.top = `${top}px`;
-    toggle.style.right = "auto";
-
-    const panelTop = Math.round(extRect.bottom + GAP);
-    const maxLeft = Math.max(8, window.innerWidth - panel.offsetWidth - 8);
-    const panelLeft = Math.min(left, maxLeft);
-    panel.style.left = `${panelLeft}px`;
-    panel.style.top = `${panelTop}px`;
-    panel.style.right = "auto";
+    if (toggle.previousSibling !== extBtn) {
+      mountNode.insertBefore(toggle, extBtn.nextSibling);
+    }
   }
 
   async function loadRoots() {
@@ -231,7 +232,7 @@
   }
 
   function renderUi() {
-    if (document.getElementById(BUTTON_ID) || document.getElementById(PANEL_ID)) return;
+    if (document.getElementById(BUTTON_ID) || document.getElementById(DIALOG_ID)) return;
 
     ensureStyles();
 
@@ -240,10 +241,9 @@
     toggle.type = "button";
     toggle.textContent = "Downloader";
 
-    const panel = document.createElement("div");
-    panel.id = PANEL_ID;
-    panel.hidden = true;
-    panel.innerHTML = `
+    const dialog = document.createElement("dialog");
+    dialog.id = DIALOG_ID;
+    dialog.innerHTML = `
       <div class="row">
         <label>File URL</label>
         <input id="dtd-url" type="text" placeholder="https://example.com/file.bin" />
@@ -262,21 +262,26 @@
           Overwrite existing file
         </label>
 
-        <button id="dtd-submit" type="button">Download</button>
+        <div class="actions">
+          <button id="dtd-submit" type="button">Download</button>
+          <button id="dtd-close" type="button">Close</button>
+        </div>
         <div class="hint">Only HTTP/HTTPS. Private/localhost targets are blocked by default.</div>
         <div class="status"></div>
       </div>
     `;
 
     toggle.addEventListener("click", () => {
-      panel.hidden = !panel.hidden;
-      if (!panel.hidden && state.roots.length === 0) {
+      if (!dialog.open) {
+        dialog.showModal();
+      }
+      if (state.roots.length === 0) {
         loadRoots().catch((err) => setStatus(err.message || String(err), "error"));
       }
     });
 
-    document.body.appendChild(toggle);
-    document.body.appendChild(panel);
+    document.body.appendChild(dialog);
+    mountButtonNearExtensions();
 
     const submit = document.getElementById("dtd-submit");
     if (submit) {
@@ -285,9 +290,12 @@
       });
     }
 
-    positionUi();
-    window.addEventListener("resize", positionUi);
-    const observer = new MutationObserver(() => positionUi());
+    const close = document.getElementById("dtd-close");
+    if (close) {
+      close.addEventListener("click", () => dialog.close());
+    }
+
+    const observer = new MutationObserver(() => mountButtonNearExtensions());
     observer.observe(document.body, { childList: true, subtree: true });
   }
 
@@ -296,6 +304,7 @@
       setTimeout(init, 150);
       return;
     }
+
     renderUi();
   }
 
