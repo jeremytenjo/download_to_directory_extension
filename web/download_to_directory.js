@@ -5,6 +5,8 @@
   const state = {
     apiPrefix: "/api",
     roots: [],
+    toggleEl: null,
+    dialogEl: null,
   };
 
   function ensureStyles() {
@@ -13,7 +15,16 @@
     const style = document.createElement("style");
     style.id = "download-to-directory-style";
     style.textContent = `
+      #download-to-directory-inline-slot {
+        display: inline-flex;
+        align-items: center;
+        margin-left: 8px;
+      }
       #${BUTTON_ID} {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 32px;
         padding: 8px 18px;
         border: 1px solid #4c4c4c;
         border-radius: 10px;
@@ -115,47 +126,34 @@
     status.textContent = message;
   }
 
-  function findExtensionsButton() {
-    const candidates = document.querySelectorAll("button,[role='button']");
-    for (const el of candidates) {
-      const text = (el.textContent || "").trim();
-      if (text === "Extensions") return el;
+  function findActionbarMountNode() {
+    const content = document.querySelector(".actionbar [data-pc-section='content']");
+    if (content) {
+      const inlineRow = content.querySelector(".relative.flex.items-center.gap-2.select-none");
+      return inlineRow || content;
     }
-    return null;
+    return document.querySelector(".actionbar .p-panel-content");
   }
 
-  function findHeaderMountNode() {
-    const extBtn = findExtensionsButton();
-    if (!extBtn) return null;
-
-    return (
-      extBtn.closest("[data-pc-section='content']") ||
-      extBtn.parentElement ||
-      null
-    );
-  }
-
-  function mountButtonNearExtensions() {
-    const toggle = document.getElementById(BUTTON_ID);
+  function ensureButtonMounted() {
+    const toggle = state.toggleEl || document.getElementById(BUTTON_ID);
     if (!toggle) return;
 
-    const extBtn = findExtensionsButton();
-    const mountNode = findHeaderMountNode();
+    const mountNode = findActionbarMountNode();
+    if (!mountNode) return;
 
-    if (!mountNode || !extBtn) {
-      if (toggle.parentElement !== document.body) {
-        document.body.appendChild(toggle);
-      }
-      return;
+    let slot = document.getElementById("download-to-directory-inline-slot");
+    if (!slot) {
+      slot = document.createElement("div");
+      slot.id = "download-to-directory-inline-slot";
     }
 
-    if (toggle.parentElement !== mountNode) {
-      mountNode.insertBefore(toggle, extBtn.nextSibling);
-      return;
+    if (slot.parentElement !== mountNode) {
+      mountNode.appendChild(slot);
     }
 
-    if (toggle.previousSibling !== extBtn) {
-      mountNode.insertBefore(toggle, extBtn.nextSibling);
+    if (toggle.parentElement !== slot) {
+      slot.appendChild(toggle);
     }
   }
 
@@ -232,18 +230,21 @@
   }
 
   function renderUi() {
-    if (document.getElementById(BUTTON_ID) || document.getElementById(DIALOG_ID)) return;
-
     ensureStyles();
 
-    const toggle = document.createElement("button");
-    toggle.id = BUTTON_ID;
-    toggle.type = "button";
-    toggle.textContent = "Downloader";
+    if (!state.toggleEl) {
+      const toggle = document.createElement("button");
+      toggle.id = BUTTON_ID;
+      toggle.type = "button";
+      toggle.textContent = "Downloader";
+      state.toggleEl = toggle;
+    }
+    const toggle = state.toggleEl;
 
-    const dialog = document.createElement("dialog");
-    dialog.id = DIALOG_ID;
-    dialog.innerHTML = `
+    if (!state.dialogEl) {
+      const dialog = document.createElement("dialog");
+      dialog.id = DIALOG_ID;
+      dialog.innerHTML = `
       <div class="row">
         <label>File URL</label>
         <input id="dtd-url" type="text" placeholder="https://example.com/file.bin" />
@@ -270,6 +271,10 @@
         <div class="status"></div>
       </div>
     `;
+      document.body.appendChild(dialog);
+      state.dialogEl = dialog;
+    }
+    const dialog = state.dialogEl;
 
     toggle.addEventListener("click", () => {
       if (!dialog.open) {
@@ -280,8 +285,7 @@
       }
     });
 
-    document.body.appendChild(dialog);
-    mountButtonNearExtensions();
+    ensureButtonMounted();
 
     const submit = document.getElementById("dtd-submit");
     if (submit) {
@@ -295,7 +299,7 @@
       close.addEventListener("click", () => dialog.close());
     }
 
-    const observer = new MutationObserver(() => mountButtonNearExtensions());
+    const observer = new MutationObserver(() => ensureButtonMounted());
     observer.observe(document.body, { childList: true, subtree: true });
   }
 
