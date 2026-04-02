@@ -16,8 +16,16 @@
     style.id = 'download-to-directory-style';
     style.textContent = `
       #download-to-directory-inline-slot {
-        display: inline-flex;
+        display: flex;
         align-items: center;
+        pointer-events: auto;
+        height: 48px;
+        flex-shrink: 0;
+        padding: 0 8px;
+        border: 1px solid var(--interface-stroke, var(--p-content-border-color, #434958));
+        border-radius: 12px;
+        background: var(--comfy-menu-bg, var(--p-content-background, #16191f));
+        box-shadow: var(--shadow-interface, 0 8px 24px rgba(0, 0, 0, 0.22));
       }
       #${BUTTON_ID} {
         display: inline-flex;
@@ -28,8 +36,8 @@
         padding: 8px 12px;
         border: none;
         border-radius: 8px;
-        background: var(--p-surface-800, #23262f);
-        color: var(--p-surface-0, #fff);
+        background: var(--secondary-background, var(--p-surface-800, #23262f));
+        color: var(--secondary-foreground, var(--p-surface-0, #fff));
         font-size: 12px;
         font-weight: 500;
         line-height: 1;
@@ -39,7 +47,7 @@
         transition: background 120ms ease;
       }
       #${BUTTON_ID}:hover {
-        background: var(--interface-button-hover-surface, #2f3340);
+        background: var(--secondary-background-hover, var(--interface-button-hover-surface, #2f3340));
       }
       #${BUTTON_ID} i {
         width: 16px;
@@ -251,24 +259,42 @@
   }
 
   function findActionbarMountNode() {
-    const content = document.querySelector(
-      ".actionbar [data-pc-section='content']",
-    );
+    const actionbarContainer = document.querySelector('.actionbar-container');
+    if (actionbarContainer?.parentElement) {
+      return {
+        parent: actionbarContainer.parentElement,
+        before: actionbarContainer,
+      };
+    }
+
+    const content = document.querySelector(".actionbar [data-pc-section='content']");
     if (content) {
       const inlineRow = content.querySelector(
         '.relative.flex.items-center.gap-2.select-none',
       );
-      return inlineRow || content;
+      return {
+        parent: inlineRow || content,
+        before: null,
+      };
     }
-    return document.querySelector('.actionbar .p-panel-content');
+
+    const fallback = document.querySelector('.actionbar .p-panel-content');
+    if (fallback) {
+      return {
+        parent: fallback,
+        before: null,
+      };
+    }
+
+    return null;
   }
 
   function ensureButtonMounted() {
     const toggle = state.toggleEl || document.getElementById(BUTTON_ID);
     if (!toggle) return;
 
-    const mountNode = findActionbarMountNode();
-    if (!mountNode) return;
+    const mountTarget = findActionbarMountNode();
+    if (!mountTarget?.parent) return;
 
     let slot = document.getElementById('download-to-directory-inline-slot');
     if (!slot) {
@@ -276,8 +302,13 @@
       slot.id = 'download-to-directory-inline-slot';
     }
 
-    if (slot.parentElement !== mountNode) {
-      mountNode.appendChild(slot);
+    if (slot.parentElement !== mountTarget.parent) {
+      mountTarget.parent.insertBefore(slot, mountTarget.before);
+    } else if (
+      mountTarget.before &&
+      slot.nextElementSibling !== mountTarget.before
+    ) {
+      mountTarget.parent.insertBefore(slot, mountTarget.before);
     }
 
     if (toggle.parentElement !== slot) {
