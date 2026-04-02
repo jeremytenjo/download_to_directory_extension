@@ -1,9 +1,11 @@
 import ipaddress
 import logging
 import os
+import ssl
 import socket
 import tempfile
 import urllib.parse
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -74,6 +76,26 @@ def _validate_remote_url(download_url: str) -> urllib.parse.ParseResult:
     return parsed
 
 
+def _normalize_download_url(download_url: str) -> str:
+    parsed = urllib.parse.urlparse(download_url)
+    host = (parsed.hostname or "").lower()
+
+    # Convert GitHub blob links to raw content links.
+    # Example:
+    # https://github.com/org/repo/blob/main/path/file.yaml
+    # -> https://raw.githubusercontent.com/org/repo/main/path/file.yaml
+    if host in {"github.com", "www.github.com"}:
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) >= 5 and parts[2] == "blob":
+            owner, repo, _, ref, *rest = parts
+            raw_path = "/".join([owner, repo, ref, *rest])
+            return urllib.parse.urlunparse(
+                ("https", "raw.githubusercontent.com", f"/{raw_path}", "", "", "")
+            )
+
+    return download_url
+
+
 def _host_is_private(hostname: str) -> bool:
     try:
         addr_infos = socket.getaddrinfo(hostname, None)
@@ -96,6 +118,28 @@ def _host_is_private(hostname: str) -> bool:
     return False
 
 
+def _open_url_with_ssl_fallback(req: urllib.request.Request, timeout: int = 45):
+    try:
+        return urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.URLError as exc:
+        if not isinstance(exc.reason, ssl.SSLCertVerificationError):
+            raise
+
+        try:
+            import certifi  # type: ignore
+        except ImportError as import_err:
+            raise web.HTTPBadRequest(
+                reason=(
+                    "TLS certificate verification failed and certifi is not installed. "
+                    "Install certifi in this Python environment or run your Python "
+                    "certificate setup, then retry."
+                )
+            ) from import_err
+
+        ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+        return urllib.request.urlopen(req, timeout=timeout, context=ssl_ctx)
+
+
 def _download_file(download_url: str, destination_path: str) -> int:
     req = urllib.request.Request(
         download_url,
@@ -109,7 +153,7 @@ def _download_file(download_url: str, destination_path: str) -> int:
     target_dir = os.path.dirname(destination_path)
 
     try:
-        with urllib.request.urlopen(req, timeout=45) as response:
+        with _open_url_with_ssl_fallback(req, timeout=45) as response:
             if response.status >= 400:
                 raise web.HTTPBadRequest(reason=f"Download failed with status {response.status}")
 
@@ -164,6 +208,7 @@ async def download_to_directory(request: web.Request) -> web.Response:
     if root_key not in roots:
         raise web.HTTPBadRequest(reason="Invalid root_key")
 
+    download_url = _normalize_download_url(download_url)
     parsed_url = _validate_remote_url(download_url)
 
     if not allow_private_hosts and parsed_url.hostname and _host_is_private(parsed_url.hostname):
