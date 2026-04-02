@@ -50,6 +50,7 @@ def _build_root_map() -> dict[str, str]:
         "input": os.path.abspath(folder_paths.get_input_directory()),
         "output": os.path.abspath(folder_paths.get_output_directory()),
         "user": os.path.abspath(folder_paths.get_user_directory()),
+        "comfy_root": os.path.abspath(folder_paths.base_path),
     }
 
     _add_subroots(roots, "models", folder_paths.models_dir)
@@ -225,6 +226,7 @@ async def download_to_directory(request: web.Request) -> web.Response:
 
     download_url = str(body.get("url", "")).strip()
     root_key = str(body.get("root_key", "")).strip()
+    folder = str(body.get("folder", "")).strip()
     subdirectory = str(body.get("subdirectory", "")).strip()
     filename = str(body.get("filename", "")).strip()
     overwrite = bool(body.get("overwrite", False))
@@ -234,6 +236,11 @@ async def download_to_directory(request: web.Request) -> web.Response:
         raise web.HTTPBadRequest(reason="Missing required field: url")
 
     roots = _build_root_map()
+    if folder:
+        root_key = "comfy_root"
+        # Treat typed folder as relative to ComfyUI root.
+        subdirectory = folder.replace("\\", "/").lstrip("/")
+
     if root_key not in roots:
         raise web.HTTPBadRequest(reason="Invalid root_key")
 

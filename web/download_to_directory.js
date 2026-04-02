@@ -385,15 +385,17 @@
   async function handleDownload() {
     const urlInput = document.getElementById('dtd-url');
     const rootInput = document.getElementById('dtd-root');
+    const folderInput = document.getElementById('dtd-folder');
     const subdirInput = document.getElementById('dtd-subdir');
     const filenameInput = document.getElementById('dtd-filename');
     const overwriteInput = document.getElementById('dtd-overwrite');
 
     const url = (urlInput?.value || '').trim();
     const rootKey = (rootInput?.value || '').trim();
+    const folder = (folderInput?.value || '').trim();
 
-    if (!url || !rootKey) {
-      setStatus('URL and root are required.', 'error');
+    if (!url || (!rootKey && !folder)) {
+      setStatus('URL and destination are required.', 'error');
       return;
     }
 
@@ -402,6 +404,7 @@
     const payload = {
       url,
       root_key: rootKey,
+      folder,
       subdirectory: (subdirInput?.value || '').trim(),
       filename: (filenameInput?.value || '').trim(),
       overwrite: Boolean(overwriteInput?.checked),
@@ -470,6 +473,9 @@
         <label>Destination root</label>
         <select id="dtd-root"></select>
 
+        <label>Folder (optional, from ComfyUI root)</label>
+        <input id="dtd-folder" type="text" placeholder="models/checkpoints or custom_nodes/my_extension" />
+
         <label>Subdirectory (optional)</label>
         <input id="dtd-subdir" type="text" placeholder="my/models" />
 
@@ -485,7 +491,7 @@
           <button id="dtd-submit" type="button">Download</button>
           <button id="dtd-close" type="button">Close</button>
         </div>
-        <div class="hint">Only HTTP/HTTPS. Private/localhost targets are blocked by default.</div>
+        <div class="hint">Only HTTP/HTTPS. Private/localhost targets are blocked by default. If Folder is set, it is relative to your ComfyUI root and overrides Destination root + Subdirectory.</div>
         <div class="status"></div>
       </div>
     `;
