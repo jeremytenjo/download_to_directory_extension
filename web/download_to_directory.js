@@ -56,9 +56,60 @@
         color: var(--p-text-color, #f5f7fb);
         box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
         padding: 0;
+        transform-origin: 50% 50%;
+        opacity: 0;
+        transform: translateY(8px) scale(0.96);
       }
       #${DIALOG_ID}::backdrop {
-        background: rgba(8, 10, 14, 0.64);
+        background: rgba(8, 10, 14, 0);
+      }
+      #${DIALOG_ID}[open] {
+        animation: dtd-dialog-in 180ms cubic-bezier(0.2, 0.8, 0.25, 1) forwards;
+      }
+      #${DIALOG_ID}[open]::backdrop {
+        animation: dtd-backdrop-in 180ms ease forwards;
+      }
+      #${DIALOG_ID}.dtd-closing {
+        animation: dtd-dialog-out 150ms cubic-bezier(0.4, 0, 1, 1) forwards;
+      }
+      #${DIALOG_ID}.dtd-closing::backdrop {
+        animation: dtd-backdrop-out 150ms ease forwards;
+      }
+      @keyframes dtd-dialog-in {
+        from {
+          opacity: 0;
+          transform: translateY(8px) scale(0.96);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+      @keyframes dtd-dialog-out {
+        from {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+        to {
+          opacity: 0;
+          transform: translateY(8px) scale(0.96);
+        }
+      }
+      @keyframes dtd-backdrop-in {
+        from {
+          background: rgba(8, 10, 14, 0);
+        }
+        to {
+          background: rgba(8, 10, 14, 0.64);
+        }
+      }
+      @keyframes dtd-backdrop-out {
+        from {
+          background: rgba(8, 10, 14, 0.64);
+        }
+        to {
+          background: rgba(8, 10, 14, 0);
+        }
       }
       #${DIALOG_ID} .body {
         padding: 24px 24px 20px;
@@ -114,7 +165,8 @@
       #${DIALOG_ID} .hint {
         color: var(--p-text-muted-color, #a8afbd);
         font-size: 14px;
-        margin-top: -2px;
+        margin-top: 10px;
+        line-height: 1.35;
       }
       #${DIALOG_ID} .inline {
         display: flex;
@@ -312,6 +364,21 @@
     );
   }
 
+  function closeDialogAnimated(dialog) {
+    if (!dialog?.open || dialog.classList.contains('dtd-closing')) return;
+
+    dialog.classList.add('dtd-closing');
+    const onAnimEnd = (event) => {
+      if (event.target !== dialog || event.animationName !== 'dtd-dialog-out') {
+        return;
+      }
+      dialog.removeEventListener('animationend', onAnimEnd);
+      dialog.classList.remove('dtd-closing');
+      dialog.close();
+    };
+    dialog.addEventListener('animationend', onAnimEnd);
+  }
+
   function renderUi() {
     ensureStyles();
 
@@ -363,6 +430,7 @@
 
     toggle.addEventListener('click', () => {
       if (!dialog.open) {
+        dialog.classList.remove('dtd-closing');
         dialog.showModal();
       }
       if (state.roots.length === 0) {
@@ -385,14 +453,18 @@
 
     const close = document.getElementById('dtd-close');
     if (close) {
-      close.addEventListener('click', () => dialog.close());
+      close.addEventListener('click', () => closeDialogAnimated(dialog));
     }
 
     // Close when clicking the dialog backdrop (outside modal content).
     dialog.addEventListener('click', (event) => {
       if (event.target === dialog) {
-        dialog.close();
+        closeDialogAnimated(dialog);
       }
+    });
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      closeDialogAnimated(dialog);
     });
 
     const observer = new MutationObserver(() => ensureButtonMounted());
