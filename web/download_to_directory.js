@@ -47,63 +47,124 @@
         font-size: 16px;
       }
       #${DIALOG_ID} {
-        width: min(440px, calc(100vw - 24px));
-        border: 1px solid #4c4c4c;
-        border-radius: 12px;
-        background: #111;
-        color: #f4f4f4;
-        padding: 12px;
+        width: min(760px, calc(100vw - 64px));
+        max-height: min(88vh, 900px);
+        overflow: hidden;
+        border: 1px solid var(--p-content-border-color, #343943);
+        border-radius: 20px;
+        background: var(--p-content-background, #16191f);
+        color: var(--p-text-color, #f5f7fb);
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+        padding: 0;
       }
       #${DIALOG_ID}::backdrop {
-        background: rgba(0, 0, 0, 0.45);
+        background: rgba(8, 10, 14, 0.64);
+      }
+      #${DIALOG_ID} .body {
+        padding: 24px 24px 20px;
+        max-height: min(88vh, 900px);
+        overflow: auto;
       }
       #${DIALOG_ID} input,
       #${DIALOG_ID} select,
       #${DIALOG_ID} button {
         width: 100%;
         box-sizing: border-box;
-        margin-top: 6px;
-        margin-bottom: 8px;
-        border-radius: 8px;
-        border: 1px solid #4c4c4c;
-        background: #191919;
-        color: #f4f4f4;
-        padding: 8px;
+        margin-top: 8px;
+        margin-bottom: 16px;
+        border-radius: 12px;
+        border: 1px solid var(--p-content-border-color, #434958);
+        background: var(--p-surface-800, #232831);
+        color: var(--p-text-color, #f5f7fb);
+        padding: 11px 14px;
+        font-size: 15px;
+        line-height: 1.4;
+      }
+      #${DIALOG_ID} input::placeholder {
+        color: var(--p-text-muted-color, #9aa2b3);
+      }
+      #${DIALOG_ID} input:focus,
+      #${DIALOG_ID} select:focus {
+        outline: none;
+        border-color: var(--p-primary-color, #4399ff);
+        box-shadow: 0 0 0 1px var(--p-primary-color, #4399ff);
+      }
+      #${DIALOG_ID} label {
+        display: block;
+        color: var(--p-text-color, #f5f7fb);
+        font-size: 15px;
+        font-weight: 600;
       }
       #${DIALOG_ID} .row {
         display: grid;
         grid-template-columns: 1fr;
-        gap: 6px;
+        gap: 0;
       }
       #${DIALOG_ID} .status {
         margin-top: 8px;
-        min-height: 18px;
+        min-height: 22px;
+        font-size: 14px;
       }
       #${DIALOG_ID} .status.error {
-        color: #ff8e8e;
+        color: #ff8f9d;
       }
       #${DIALOG_ID} .status.success {
-        color: #9df5b3;
+        color: #6de4a0;
       }
       #${DIALOG_ID} .hint {
-        opacity: 0.75;
-        font-size: 11px;
+        color: var(--p-text-muted-color, #a8afbd);
+        font-size: 14px;
+        margin-top: -2px;
       }
       #${DIALOG_ID} .inline {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 12px;
+        margin: 6px 0 8px;
       }
       #${DIALOG_ID} .inline input[type="checkbox"] {
-        width: auto;
         margin: 0;
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        border: 1px solid var(--p-content-border-color, #505768);
+        background: var(--p-surface-900, #1a1f27);
+        accent-color: var(--p-primary-color, #2f8dff);
+        box-shadow: none;
       }
       #${DIALOG_ID} .actions {
         display: flex;
-        gap: 8px;
+        gap: 12px;
+        margin-top: 8px;
       }
       #${DIALOG_ID} .actions button {
         margin-bottom: 0;
+        height: 46px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: filter 120ms ease, border-color 120ms ease, background 120ms ease;
+      }
+      #${DIALOG_ID} #dtd-submit {
+        background: var(--p-primary-color, #2587f9);
+        border-color: color-mix(in srgb, var(--p-primary-color, #2587f9) 68%, #ffffff 32%);
+        color: #ffffff;
+      }
+      #${DIALOG_ID} #dtd-submit:hover {
+        filter: brightness(1.08);
+      }
+      #${DIALOG_ID} #dtd-close {
+        background: var(--p-surface-800, #232831);
+        border-color: var(--p-content-border-color, #434958);
+        color: var(--p-text-color, #f5f7fb);
+      }
+      #${DIALOG_ID} #dtd-close:hover {
+        background: var(--p-surface-700, #2c323d);
+      }
+      #${DIALOG_ID} .title {
+        margin: 0 0 12px;
+        font-size: 30px;
+        line-height: 1.1;
+        font-weight: 650;
       }
     `;
 
@@ -268,7 +329,8 @@
       const dialog = document.createElement('dialog');
       dialog.id = DIALOG_ID;
       dialog.innerHTML = `
-      <div class="row">
+      <div class="body row">
+        <h2 class="title">Downloader</h2>
         <label>File URL</label>
         <input id="dtd-url" type="text" placeholder="https://example.com/file.bin" />
 
