@@ -299,7 +299,9 @@
       };
     }
 
-    const content = document.querySelector(".actionbar [data-pc-section='content']");
+    const content = document.querySelector(
+      ".actionbar [data-pc-section='content']",
+    );
     if (content) {
       const inlineRow = content.querySelector(
         '.relative.flex.items-center.gap-2.select-none',
@@ -358,7 +360,10 @@
     if (status === 400 && msg.includes('private or localhost')) {
       return 'This URL points to a private/local address, which is blocked for safety.';
     }
-    if (status === 400 && msg.includes('folder must be inside models/ or custom_nodes/')) {
+    if (
+      status === 400 &&
+      msg.includes('folder must be inside models/ or custom_nodes/')
+    ) {
       return 'Folder must be inside models/ or custom_nodes/ (relative to ComfyUI root).';
     }
     if (status === 400 && msg.includes('only http/https')) {
@@ -417,7 +422,10 @@
   function saveRecentFolder(folder) {
     const normalized = normalizeFolderValue(folder);
     if (!normalized) return;
-    const deduped = [normalized, ...readRecentFolders().filter((f) => f !== normalized)];
+    const deduped = [
+      normalized,
+      ...readRecentFolders().filter((f) => f !== normalized),
+    ];
     writeRecentFolders(deduped);
   }
 
@@ -473,7 +481,10 @@
     const value = Number(bytes || 0);
     if (!Number.isFinite(value) || value <= 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const exp = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+    const exp = Math.min(
+      Math.floor(Math.log(value) / Math.log(1024)),
+      units.length - 1,
+    );
     const size = value / 1024 ** exp;
     return `${size.toFixed(exp >= 2 ? 2 : 1)} ${units[exp]}`;
   }
@@ -509,7 +520,9 @@
         setStatus('Queued...');
       } else if (status === 'running') {
         if (Number.isFinite(totalBytes) && totalBytes > 0) {
-          const progressPct = Number.isFinite(percent) ? percent.toFixed(1) : '0.0';
+          const progressPct = Number.isFinite(percent)
+            ? percent.toFixed(1)
+            : '0.0';
           setStatus(
             `Downloading... ${formatBytes(bytesWritten)} / ${formatBytes(totalBytes)} (${progressPct}%)`,
           );
@@ -519,9 +532,7 @@
       } else if (status === 'completed') {
         return data;
       } else if (status === 'failed') {
-        throw new Error(
-          String(data.error || 'Download failed.'),
-        );
+        throw new Error(String(data.error || 'Download failed.'));
       }
 
       await sleep(350);
@@ -629,7 +640,9 @@
       const mb = Number(done.bytes_written || 0) / (1024 * 1024);
       const recentFolder =
         normalizeFolderValue(effectiveFolder) ||
-        normalizeFolderValue(`${effectiveRootKey}${subdirectory ? `/${subdirectory}` : ''}`);
+        normalizeFolderValue(
+          `${effectiveRootKey}${subdirectory ? `/${subdirectory}` : ''}`,
+        );
       saveRecentFolder(recentFolder);
       renderRootOptions();
       const refreshResult = await triggerNodeDefinitionsRefresh();
@@ -729,17 +742,6 @@
         <label>Folder (optional, from ComfyUI root)</label>
         <input id="dtd-folder" type="text" placeholder="models/checkpoints or custom_nodes/my_extension" />
 
-        <details class="advanced">
-          <summary>Advanced</summary>
-          <div class="advanced-body">
-            <div class="advanced-note">Allow writing to any folder under ComfyUI root (not only models/ and custom_nodes/).</div>
-            <label class="inline">
-              <input id="dtd-allow-any-folder" type="checkbox" />
-              Allow any ComfyUI-root folder
-            </label>
-          </div>
-        </details>
-
         <label>Subdirectory (optional)</label>
         <input id="dtd-subdir" type="text" placeholder="my/models" />
 
@@ -750,6 +752,17 @@
           <input id="dtd-overwrite" type="checkbox" />
           Overwrite existing file
         </label>
+
+        <details class="advanced">
+          <summary>Advanced</summary>
+          <div class="advanced-body">
+            <div class="advanced-note">Allow writing to any folder under ComfyUI root (not only models/ and custom_nodes/).</div>
+            <label class="inline">
+              <input id="dtd-allow-any-folder" type="checkbox" />
+              Allow any ComfyUI-root folder
+            </label>
+          </div>
+        </details>
 
         <div class="actions">
           <button id="dtd-submit" type="button">Download</button>
