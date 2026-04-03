@@ -141,6 +141,12 @@
         flex-direction: column;
         gap: 6px;
       }
+      #${DIALOG_ID} .form-section {
+        display: flex;
+        flex-direction: column;
+        gap: var(--dtd-stack-gap);
+        padding: 10px 0;
+      }
       #${DIALOG_ID} .bleed {
         box-sizing: border-box;
         margin-left: calc(-1 * var(--dtd-body-pad-x));
@@ -762,49 +768,51 @@
           <h2 class="title">Downloader</h2>
         </div>
         <div class="divider bleed"></div>
-        <div class="field">
-          <label>File URL</label>
-          <input id="dtd-url" type="text" placeholder="https://example.com/file.bin" />
-        </div>
+        <div class="form-section">
+          <div class="field">
+            <label>File URL</label>
+            <input id="dtd-url" type="text" placeholder="https://example.com/file.bin" />
+          </div>
 
-        <div class="field">
-          <label>Destination root</label>
-          <select id="dtd-root"></select>
-        </div>
+          <div class="field">
+            <label>Destination root</label>
+            <select id="dtd-root"></select>
+          </div>
 
-        <div class="field">
-          <label>Folder (optional, from ComfyUI root)</label>
-          <input id="dtd-folder" type="text" placeholder="models/checkpoints or custom_nodes/my_extension" />
-        </div>
+          <div class="field">
+            <label>Folder (optional, from ComfyUI root)</label>
+            <input id="dtd-folder" type="text" placeholder="models/checkpoints or custom_nodes/my_extension" />
+          </div>
 
-        <div class="field">
-          <label>Subdirectory (optional)</label>
-          <input id="dtd-subdir" type="text" placeholder="my/models" />
-        </div>
+          <div class="field">
+            <label>Subdirectory (optional)</label>
+            <input id="dtd-subdir" type="text" placeholder="my/models" />
+          </div>
 
-        <div class="field">
-          <label>Filename (optional)</label>
-          <input id="dtd-filename" type="text" placeholder="auto from URL if empty" />
-        </div>
+          <div class="field">
+            <label>Filename (optional)</label>
+            <input id="dtd-filename" type="text" placeholder="auto from URL if empty" />
+          </div>
 
-        <div class="field">
-          <label class="inline">
-            <input id="dtd-overwrite" type="checkbox" />
-            Overwrite existing file
-          </label>
-        </div>
+          <div class="field">
+            <label class="inline">
+              <input id="dtd-overwrite" type="checkbox" />
+              Overwrite existing file
+            </label>
+          </div>
 
-        <div class="field">
-          <details class="advanced">
-            <summary>Advanced</summary>
-            <div class="advanced-body">
-              <div class="advanced-note">Allow writing to any folder under ComfyUI root (not only models/ and custom_nodes/).</div>
-              <label class="inline">
-                <input id="dtd-allow-any-folder" type="checkbox" />
-                Allow any ComfyUI-root folder
-              </label>
-            </div>
-          </details>
+          <div class="field">
+            <details class="advanced">
+              <summary>Advanced</summary>
+              <div class="advanced-body">
+                <div class="advanced-note">Allow writing to any folder under ComfyUI root (not only models/ and custom_nodes/).</div>
+                <label class="inline">
+                  <input id="dtd-allow-any-folder" type="checkbox" />
+                  Allow any ComfyUI-root folder
+                </label>
+              </div>
+            </details>
+          </div>
         </div>
 
         <div class="divider bleed"></div>
