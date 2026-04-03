@@ -598,14 +598,57 @@
         normalizeFolderValue(`${effectiveRootKey}${subdirectory ? `/${subdirectory}` : ''}`);
       saveRecentFolder(recentFolder);
       renderRootOptions();
+      const refreshResult = await triggerNodeDefinitionsRefresh();
+      const refreshSuffix = refreshResult
+        ? ' Node definitions refreshed.'
+        : ' Download complete. Press R to refresh node definitions.';
       setStatus(
-        `Saved to ${done.destination_path} (${mb.toFixed(2)} MB)`,
+        `Saved to ${done.destination_path} (${mb.toFixed(2)} MB).${refreshSuffix}`,
         'success',
       );
     } catch (err) {
       setStatus(err.message || String(err), 'error');
     } finally {
       if (submitButton) submitButton.disabled = false;
+    }
+  }
+
+  async function triggerNodeDefinitionsRefresh() {
+    const commandId = 'Comfy.RefreshNodeDefinitions';
+    const appObj = window.app;
+    const attempts = [
+      () => appObj?.extensionManager?.command?.execute?.(commandId),
+      () => appObj?.extensionManager?.commands?.execute?.(commandId),
+      () => appObj?.commands?.execute?.(commandId),
+      () => appObj?.refreshComboInNodes?.(),
+    ];
+
+    for (const run of attempts) {
+      try {
+        const result = run();
+        if (result && typeof result.then === 'function') {
+          await result;
+        }
+        if (result !== undefined || run === attempts[attempts.length - 1]) {
+          return true;
+        }
+      } catch {
+        // Try the next known refresh path.
+      }
+    }
+
+    try {
+      const event = new KeyboardEvent('keydown', {
+        key: 'r',
+        code: 'KeyR',
+        bubbles: true,
+        cancelable: true,
+      });
+      const accepted =
+        document.dispatchEvent(event) || window.dispatchEvent(event);
+      return Boolean(accepted);
+    } catch {
+      return false;
     }
   }
 
