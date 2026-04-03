@@ -1,6 +1,8 @@
 (() => {
   const DIALOG_ID = 'download-to-directory-dialog';
   const BUTTON_ID = 'download-to-directory-button';
+  const RECENT_FOLDERS_KEY = 'download-to-directory-recent-folders-v1';
+  const MAX_RECENT_FOLDERS = 8;
 
   const state = {
     apiPrefix: '/api',
@@ -346,6 +348,95 @@
     return raw || fallbackMessage || `Request failed (${status})`;
   }
 
+  function normalizeFolderValue(value) {
+    return String(value || '')
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '')
+      .replace(/\/{2,}/g, '/');
+  }
+
+  function readRecentFolders() {
+    try {
+      const raw = localStorage.getItem(RECENT_FOLDERS_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((entry) => normalizeFolderValue(entry))
+        .filter((entry) => entry.length > 0)
+        .slice(0, MAX_RECENT_FOLDERS);
+    } catch {
+      return [];
+    }
+  }
+
+  function writeRecentFolders(folders) {
+    try {
+      localStorage.setItem(
+        RECENT_FOLDERS_KEY,
+        JSON.stringify(folders.slice(0, MAX_RECENT_FOLDERS)),
+      );
+    } catch {
+      // Ignore storage failures; this is best-effort UX state.
+    }
+  }
+
+  function saveRecentFolder(folder) {
+    const normalized = normalizeFolderValue(folder);
+    if (!normalized) return;
+    const deduped = [normalized, ...readRecentFolders().filter((f) => f !== normalized)];
+    writeRecentFolders(deduped);
+  }
+
+  function renderRootOptions() {
+    const select = document.getElementById('dtd-root');
+    if (!select) return;
+
+    const recentFolders = readRecentFolders();
+    const previousValue = select.value;
+    select.innerHTML = '';
+
+    if (recentFolders.length > 0) {
+      const recentGroup = document.createElement('optgroup');
+      recentGroup.label = 'Recent folders';
+      for (const folder of recentFolders) {
+        const opt = document.createElement('option');
+        opt.value = `recent:${folder}`;
+        opt.textContent = folder;
+        opt.title = `ComfyUI root/${folder}`;
+        recentGroup.appendChild(opt);
+      }
+      select.appendChild(recentGroup);
+
+      const allGroup = document.createElement('optgroup');
+      allGroup.label = 'All folders';
+      for (const root of state.roots) {
+        const opt = document.createElement('option');
+        opt.value = root.key;
+        opt.textContent = root.key;
+        opt.title = root.path;
+        allGroup.appendChild(opt);
+      }
+      select.appendChild(allGroup);
+    } else {
+      for (const root of state.roots) {
+        const opt = document.createElement('option');
+        opt.value = root.key;
+        opt.textContent = root.key;
+        opt.title = root.path;
+        select.appendChild(opt);
+      }
+    }
+
+    if (previousValue) {
+      const hasPrevious = Array.from(select.options).some(
+        (opt) => opt.value === previousValue,
+      );
+      if (hasPrevious) select.value = previousValue;
+    }
+  }
+
   function formatBytes(bytes) {
     const value = Number(bytes || 0);
     if (!Number.isFinite(value) || value <= 0) return '0 B';
@@ -427,15 +518,7 @@
     }
 
     state.roots = Array.isArray(data.roots) ? data.roots : [];
-
-    select.innerHTML = '';
-    for (const root of state.roots) {
-      const opt = document.createElement('option');
-      opt.value = root.key;
-      opt.textContent = root.key;
-      opt.title = root.path;
-      select.appendChild(opt);
-    }
+    renderRootOptions();
 
     if (select.options.length === 0) {
       setStatus('No writable roots available', 'error');
@@ -455,9 +538,15 @@
     const url = (urlInput?.value || '').trim();
     const rootKey = (rootInput?.value || '').trim();
     const folder = (folderInput?.value || '').trim();
+    const subdirectory = (subdirInput?.value || '').trim();
     const submitButton = document.getElementById('dtd-submit');
+    const selectedRecentFolder = rootKey.startsWith('recent:')
+      ? rootKey.slice('recent:'.length)
+      : '';
+    const effectiveFolder = folder || selectedRecentFolder;
+    const effectiveRootKey = rootKey.startsWith('recent:') ? '' : rootKey;
 
-    if (!url || (!rootKey && !folder)) {
+    if (!url || (!effectiveRootKey && !effectiveFolder)) {
       setStatus('URL and destination are required.', 'error');
       return;
     }
@@ -469,9 +558,9 @@
 
     const payload = {
       url,
-      root_key: rootKey,
-      folder,
-      subdirectory: (subdirInput?.value || '').trim(),
+      root_key: effectiveRootKey,
+      folder: effectiveFolder,
+      subdirectory,
       filename: (filenameInput?.value || '').trim(),
       overwrite: Boolean(overwriteInput?.checked),
     };
@@ -504,6 +593,11 @@
 
       const done = await pollDownloadProgress(jobId, progressToken);
       const mb = Number(done.bytes_written || 0) / (1024 * 1024);
+      const recentFolder =
+        normalizeFolderValue(effectiveFolder) ||
+        normalizeFolderValue(`${effectiveRootKey}${subdirectory ? `/${subdirectory}` : ''}`);
+      saveRecentFolder(recentFolder);
+      renderRootOptions();
       setStatus(
         `Saved to ${done.destination_path} (${mb.toFixed(2)} MB)`,
         'success',
@@ -595,6 +689,17 @@
     });
 
     ensureButtonMounted();
+
+    const rootSelect = document.getElementById('dtd-root');
+    const folderInput = document.getElementById('dtd-folder');
+    if (rootSelect && folderInput) {
+      rootSelect.addEventListener('change', () => {
+        const selected = rootSelect.value || '';
+        if (selected.startsWith('recent:')) {
+          folderInput.value = selected.slice('recent:'.length);
+        }
+      });
+    }
 
     const submit = document.getElementById('dtd-submit');
     if (submit) {
