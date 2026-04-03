@@ -346,32 +346,6 @@ async def list_download_roots(request: web.Request) -> web.Response:
     return web.json_response({"roots": payload})
 
 
-@PromptServer.instance.routes.post("/download-to-dir")
-async def download_to_directory(request: web.Request) -> web.Response:
-    body = await request.json()
-    prepared = _prepare_download_request(body)
-
-    try:
-        bytes_written, _total_bytes = _download_file(
-            prepared["download_url"],
-            prepared["destination_path"],
-        )
-    except web.HTTPException:
-        raise
-    except Exception as exc:
-        logging.exception("download-to-dir failed")
-        raise web.HTTPInternalServerError(reason=f"Download failed: {exc}")
-
-    return web.json_response(
-        {
-            "ok": True,
-            "destination_path": prepared["destination_path"],
-            "bytes_written": bytes_written,
-            "root_key": prepared["root_key"],
-        }
-    )
-
-
 @PromptServer.instance.routes.post("/download-to-dir/start")
 async def start_download_to_directory(request: web.Request) -> web.Response:
     body = await request.json()

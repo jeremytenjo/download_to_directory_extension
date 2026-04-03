@@ -1219,7 +1219,7 @@
           </div>
 
           <div class="field">
-            <details id="dtd-history" class="section history">
+            <details class="section history">
               <summary>History (Session)</summary>
               <div class="history-body">
                 <p id="dtd-history-empty" class="history-empty">No downloads in this session yet.</p>
