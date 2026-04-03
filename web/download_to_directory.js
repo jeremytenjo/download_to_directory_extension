@@ -14,9 +14,6 @@
     roots: [],
     toggleEl: null,
     dialogEl: null,
-    statusJobId: '',
-    activeDownloadCount: 0,
-    activeJobs: {},
     historyEntries: [],
   };
 
@@ -304,47 +301,6 @@
         max-height: min(42vh, 360px);
         overflow: auto;
       }
-      #${DIALOG_ID} .active-body {
-        padding: 0 12px 10px;
-        max-height: min(35vh, 300px);
-        overflow: auto;
-      }
-      #${DIALOG_ID} .active-empty {
-        margin: 0;
-        color: var(--p-text-muted-color, #a8afbd);
-        font-size: 13px;
-        padding: 2px 0;
-      }
-      #${DIALOG_ID} .active-list {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-      }
-      #${DIALOG_ID} .active-item {
-        border: 1px solid var(--p-content-border-color, #434958);
-        border-radius: 10px;
-        padding: 10px;
-        background: var(--p-surface-800, #232831);
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-      #${DIALOG_ID} .active-main {
-        font-size: 13px;
-        line-height: 1.35;
-        color: var(--p-text-color, #f5f7fb);
-      }
-      #${DIALOG_ID} .active-sub {
-        font-size: 12px;
-        line-height: 1.35;
-        color: var(--p-text-muted-color, #a8afbd);
-        overflow-wrap: anywhere;
-      }
-      #${DIALOG_ID} .active-progress {
-        font-size: 12px;
-        line-height: 1.35;
-        color: var(--p-text-color, #f5f7fb);
-      }
       #${DIALOG_ID} .history-empty {
         margin: 0;
         color: var(--p-text-muted-color, #a8afbd);
@@ -382,6 +338,10 @@
       }
       #${DIALOG_ID} .history-status.failed {
         color: #ff8f9d;
+      }
+      #${DIALOG_ID} .history-status.queued,
+      #${DIALOG_ID} .history-status.running {
+        color: #7db9ff;
       }
       #${DIALOG_ID} .history-time {
         font-size: 12px;
@@ -729,24 +689,45 @@
           ? String(entry.id).trim()
           : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       created_at: Number(entry?.created_at || Date.now()),
-      status:
-        String(entry?.status || 'failed').toLowerCase() === 'success'
-          ? 'success'
-          : 'failed',
+      status: (() => {
+        const candidate = String(entry?.status || 'failed').toLowerCase();
+        return ['queued', 'running', 'success', 'failed'].includes(candidate)
+          ? candidate
+          : 'failed';
+      })(),
       url: String(entry?.url || '').trim(),
       selected_root_value: String(entry?.selected_root_value || '').trim(),
       root_key: String(entry?.root_key || '').trim(),
       folder: String(entry?.folder || '').trim(),
       subdirectory: String(entry?.subdirectory || '').trim(),
       filename: String(entry?.filename || '').trim(),
+      file_name: String(entry?.file_name || '').trim(),
       overwrite: Boolean(entry?.overwrite),
       destination_path: String(entry?.destination_path || '').trim(),
       path: String(entry?.path || '').trim(),
       bytes_written: Number(entry?.bytes_written || 0),
+      total_bytes:
+        entry?.total_bytes == null ? null : Number(entry.total_bytes || 0),
+      progress_percent:
+        entry?.progress_percent == null
+          ? null
+          : Number(entry.progress_percent || 0),
       error: String(entry?.error || '').trim(),
     };
 
     writeHistoryEntries([record, ...state.historyEntries]);
+    renderHistory();
+  }
+
+  function updateHistoryEntry(entryId, patch) {
+    const id = String(entryId || '').trim();
+    if (!id) return;
+    writeHistoryEntries(
+      state.historyEntries.map((entry) => {
+        if (entry.id !== id) return entry;
+        return { ...entry, ...patch };
+      }),
+    );
     renderHistory();
   }
 
@@ -789,6 +770,45 @@
         `${entry?.root_key || ''}${entry?.subdirectory ? `/${entry.subdirectory}` : ''}`,
       )
     );
+  }
+
+  function inferDisplayNameFromEntry(entry) {
+    if (entry?.file_name) return String(entry.file_name);
+    if (entry?.filename) return String(entry.filename);
+    const destinationName = String(entry?.destination_path || '')
+      .trim()
+      .split('/')
+      .pop();
+    if (destinationName) return destinationName;
+    try {
+      const parsed = new URL(String(entry?.url || '').trim());
+      const urlName = String(parsed.pathname || '').split('/').pop();
+      return urlName || 'download.bin';
+    } catch {
+      return 'download.bin';
+    }
+  }
+
+  function formatEntryProgress(entry) {
+    const normalizedStatus = String(entry?.status || '').toLowerCase();
+    if (normalizedStatus === 'queued') return 'Queued...';
+    if (normalizedStatus === 'running') {
+      const bytesWritten = Number(entry?.bytes_written || 0);
+      const totalBytes =
+        entry?.total_bytes == null ? null : Number(entry.total_bytes);
+      const percent = Number(entry?.progress_percent);
+      if (Number.isFinite(totalBytes) && totalBytes > 0) {
+        const pct = Number.isFinite(percent)
+          ? percent.toFixed(1)
+          : ((bytesWritten / totalBytes) * 100).toFixed(1);
+        return `${formatBytes(bytesWritten)} / ${formatBytes(totalBytes)} (${pct}%)`;
+      }
+      return `${formatBytes(bytesWritten)} downloaded`;
+    }
+    if (normalizedStatus === 'success' && Number(entry?.bytes_written) > 0) {
+      return formatBytes(Number(entry.bytes_written));
+    }
+    return '';
   }
 
   function renderRootOptions() {
@@ -864,7 +884,14 @@
 
     const status = document.createElement('span');
     status.className = `history-status ${entry.status}`;
-    status.textContent = entry.status === 'success' ? 'Success' : 'Failed';
+    status.textContent =
+      entry.status === 'success'
+        ? 'Success'
+        : entry.status === 'failed'
+          ? 'Failed'
+          : entry.status === 'running'
+            ? 'Running'
+            : 'Queued';
 
     const time = document.createElement('span');
     time.className = 'history-time';
@@ -874,21 +901,16 @@
 
     const main = document.createElement('div');
     main.className = 'history-main';
-    if (entry.status === 'success') {
-      main.textContent = entry.destination_path || 'Downloaded file';
-    } else {
-      main.textContent = entry.error || 'Download failed';
-    }
+    main.textContent = inferDisplayNameFromEntry(entry);
 
     const sub = document.createElement('div');
     sub.className = 'history-sub';
     const parts = [];
-    if (entry.url) parts.push(entry.url);
-    const folderLabel = getEntryPath(entry);
-    if (folderLabel) parts.push(`to ${folderLabel}`);
-    if (entry.status === 'success' && Number(entry.bytes_written) > 0) {
-      parts.push(formatBytes(entry.bytes_written));
-    }
+    const locationLabel = String(entry.destination_path || '').trim() || getEntryPath(entry);
+    if (locationLabel) parts.push(locationLabel);
+    const progressLabel = formatEntryProgress(entry);
+    if (progressLabel) parts.push(progressLabel);
+    if (entry.status === 'failed' && entry.error) parts.push(entry.error);
     sub.textContent = parts.join(' • ');
 
     const actions = document.createElement('div');
@@ -902,7 +924,7 @@
       deleteBtn.dataset.id = entry.id;
       deleteBtn.textContent = 'Delete from disk';
       actions.appendChild(deleteBtn);
-    } else {
+    } else if (entry.status === 'failed') {
       const pathInput = document.createElement('input');
       pathInput.type = 'text';
       pathInput.className = 'history-path-input';
@@ -944,93 +966,6 @@
     emptyEl.hidden = true;
     for (const entry of state.historyEntries) {
       historyList.appendChild(createHistoryItemElement(entry));
-    }
-  }
-
-  function inferActiveDisplayName(url, destinationPath) {
-    const destinationName = String(destinationPath || '').trim().split('/').pop();
-    if (destinationName) return destinationName;
-    try {
-      const parsed = new URL(String(url || '').trim());
-      const urlName = String(parsed.pathname || '').split('/').pop();
-      return urlName || 'download.bin';
-    } catch {
-      return 'download.bin';
-    }
-  }
-
-  function formatActiveProgress(status, bytesWritten, totalBytes, percent) {
-    const normalizedStatus = String(status || '').toLowerCase();
-    if (normalizedStatus === 'queued') return 'Queued...';
-    if (normalizedStatus === 'failed') return 'Failed';
-    if (normalizedStatus === 'completed') return 'Completed';
-
-    const current = Number(bytesWritten || 0);
-    const total = totalBytes == null ? null : Number(totalBytes);
-    const pct = Number(percent);
-    if (Number.isFinite(total) && total > 0) {
-      const progressPct = Number.isFinite(pct)
-        ? pct.toFixed(1)
-        : ((current / total) * 100).toFixed(1);
-      return `${formatBytes(current)} / ${formatBytes(total)} (${progressPct}%)`;
-    }
-    return `${formatBytes(current)} downloaded`;
-  }
-
-  function updateActiveJob(jobId, patch) {
-    const id = String(jobId || '').trim();
-    if (!id) return;
-    const current = state.activeJobs[id] || { job_id: id };
-    state.activeJobs[id] = { ...current, ...patch, job_id: id };
-    renderActiveDownloads();
-  }
-
-  function removeActiveJob(jobId) {
-    const id = String(jobId || '').trim();
-    if (!id || !state.activeJobs[id]) return;
-    delete state.activeJobs[id];
-    renderActiveDownloads();
-  }
-
-  function renderActiveDownloads() {
-    const activeList = document.getElementById('dtd-active-list');
-    const emptyEl = document.getElementById('dtd-active-empty');
-    if (!activeList || !emptyEl) return;
-
-    const jobs = Object.values(state.activeJobs || {}).sort(
-      (a, b) => Number(b.started_at || 0) - Number(a.started_at || 0),
-    );
-
-    activeList.innerHTML = '';
-    if (jobs.length === 0) {
-      emptyEl.hidden = false;
-      return;
-    }
-
-    emptyEl.hidden = true;
-    for (const job of jobs) {
-      const item = document.createElement('div');
-      item.className = 'active-item';
-
-      const main = document.createElement('div');
-      main.className = 'active-main';
-      main.textContent = job.file_name || 'download.bin';
-
-      const sub = document.createElement('div');
-      sub.className = 'active-sub';
-      sub.textContent = job.destination_path || 'Preparing destination...';
-
-      const progress = document.createElement('div');
-      progress.className = 'active-progress';
-      progress.textContent = formatActiveProgress(
-        job.status,
-        job.bytes_written,
-        job.total_bytes,
-        job.progress_percent,
-      );
-
-      item.append(main, sub, progress);
-      activeList.appendChild(item);
     }
   }
 
@@ -1149,11 +1084,6 @@
     }
   }
 
-  function setStatusForJob(jobId, message, type = '') {
-    if (state.statusJobId && state.statusJobId !== jobId) return;
-    setStatus(message, type);
-  }
-
   async function pollDownloadProgress(jobId) {
     while (true) {
       const resp = await apiFetch(`/download-to-dir/progress/${jobId}`, {
@@ -1176,31 +1106,14 @@
       const totalBytes =
         data.total_bytes == null ? null : Number(data.total_bytes);
       const percent = Number(data.progress_percent);
-      updateActiveJob(jobId, {
+      updateHistoryEntry(jobId, {
         status,
         bytes_written: bytesWritten,
         total_bytes: totalBytes,
         progress_percent: Number.isFinite(percent) ? percent : null,
       });
 
-      if (status === 'queued') {
-        setStatusForJob(jobId, 'Queued...');
-      } else if (status === 'running') {
-        if (Number.isFinite(totalBytes) && totalBytes > 0) {
-          const progressPct = Number.isFinite(percent)
-            ? percent.toFixed(1)
-            : '0.0';
-          setStatusForJob(
-            jobId,
-            `Downloading... ${formatBytes(bytesWritten)} / ${formatBytes(totalBytes)} (${progressPct}%)`,
-          );
-        } else {
-          setStatusForJob(
-            jobId,
-            `Downloading... ${formatBytes(bytesWritten)} downloaded`,
-          );
-        }
-      } else if (status === 'completed') {
+      if (status === 'completed') {
         return data;
       } else if (status === 'failed') {
         throw new Error(String(data.error || 'Download failed.'));
@@ -1248,7 +1161,7 @@
       return;
     }
 
-    setStatus('Starting download...');
+    setStatus('Ready.');
 
     const payload = {
       url: attempt.url,
@@ -1299,21 +1212,33 @@
       }
 
       trackedJobId = jobId;
-      state.statusJobId = jobId;
-      state.activeDownloadCount += 1;
-      updateActiveJob(jobId, {
-        started_at: Date.now(),
+      addHistoryEntry({
+        ...attempt,
+        id: jobId,
+        created_at: Date.now(),
         status: 'queued',
+        file_name: inferDisplayNameFromEntry({
+          ...attempt,
+          destination_path: String(startData.destination_path || ''),
+        }),
+        destination_path: String(startData.destination_path || ''),
+        bytes_written: 0,
+        total_bytes: null,
+        progress_percent: 0,
+        error: '',
+      });
+      updateHistoryEntry(jobId, {
+        status: 'running',
         bytes_written: 0,
         total_bytes: null,
         progress_percent: 0,
         destination_path: String(startData.destination_path || ''),
-        file_name: inferActiveDisplayName(
-          attempt.url,
-          String(startData.destination_path || ''),
-        ),
+        file_name: inferDisplayNameFromEntry({
+          ...attempt,
+          destination_path: String(startData.destination_path || ''),
+        }),
+        error: '',
       });
-      setStatus('Download started. You can queue another file now.');
 
       const done = await pollDownloadProgress(jobId);
       const mb = Number(done.bytes_written || 0) / (1024 * 1024);
@@ -1325,19 +1250,21 @@
       saveRecentFolder(recentFolder);
       renderRootOptions();
 
-      addHistoryEntry({
-        ...attempt,
+      updateHistoryEntry(jobId, {
         status: 'success',
         destination_path: String(done.destination_path || ''),
         bytes_written: Number(done.bytes_written || 0),
+        total_bytes:
+          done.total_bytes == null ? null : Number(done.total_bytes || 0),
+        progress_percent: 100,
+        error: '',
       });
 
       const refreshResult = await triggerNodeDefinitionsRefresh();
       const refreshSuffix = refreshResult
         ? ' Node definitions refreshed.'
         : ' Download complete. Press R to refresh node definitions.';
-      setStatusForJob(
-        jobId,
+      setStatus(
         `Saved to ${done.destination_path} (${mb.toFixed(2)} MB).${refreshSuffix}`,
         'success',
       );
@@ -1346,24 +1273,22 @@
         attempt.url,
         err?.message || String(err),
       );
+      setStatus(message, 'error');
       if (trackedJobId) {
-        setStatusForJob(trackedJobId, message, 'error');
-      } else {
-        setStatus(message, 'error');
+        updateHistoryEntry(trackedJobId, {
+          status: 'failed',
+          error: message,
+        });
       }
-      addHistoryEntry({
-        ...attempt,
-        status: 'failed',
-        error: message,
-      });
+      if (!trackedJobId) {
+        addHistoryEntry({
+          ...attempt,
+          status: 'failed',
+          error: message,
+        });
+      }
     } finally {
-      if (trackedJobId) {
-        state.activeDownloadCount = Math.max(0, state.activeDownloadCount - 1);
-        removeActiveJob(trackedJobId);
-      }
-      if (trackedJobId && state.statusJobId === trackedJobId) {
-        state.statusJobId = '';
-      }
+      // Per-download state persists in the combined list.
     }
   }
 
@@ -1492,20 +1417,10 @@
 
           <div class="field">
             <details class="section history">
-              <summary>History (Session)</summary>
+              <summary>Active Downloaders</summary>
               <div class="history-body">
-                <p id="dtd-history-empty" class="history-empty">No downloads in this session yet.</p>
+                <p id="dtd-history-empty" class="history-empty">No downloads yet.</p>
                 <div id="dtd-history-list" class="history-list"></div>
-              </div>
-            </details>
-          </div>
-
-          <div class="field">
-            <details id="dtd-active" class="section active" open>
-              <summary>Active Downloads</summary>
-              <div class="active-body">
-                <p id="dtd-active-empty" class="active-empty">No active downloads.</p>
-                <div id="dtd-active-list" class="active-list"></div>
               </div>
             </details>
           </div>
@@ -1560,7 +1475,6 @@
     }
 
     renderHistory();
-    renderActiveDownloads();
 
     const rootSelect = document.getElementById('dtd-root');
     const folderInput = document.getElementById('dtd-folder');
