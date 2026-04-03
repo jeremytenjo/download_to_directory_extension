@@ -595,9 +595,10 @@
           ? String(entry.id).trim()
           : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       created_at: Number(entry?.created_at || Date.now()),
-      status: String(entry?.status || 'failed').toLowerCase() === 'success'
-        ? 'success'
-        : 'failed',
+      status:
+        String(entry?.status || 'failed').toLowerCase() === 'success'
+          ? 'success'
+          : 'failed',
       url: String(entry?.url || '').trim(),
       selected_root_value: String(entry?.selected_root_value || '').trim(),
       root_key: String(entry?.root_key || '').trim(),
@@ -618,7 +619,9 @@
   function removeHistoryEntry(entryId) {
     const id = String(entryId || '').trim();
     if (!id) return;
-    writeHistoryEntries(state.historyEntries.filter((entry) => entry.id !== id));
+    writeHistoryEntries(
+      state.historyEntries.filter((entry) => entry.id !== id),
+    );
     renderHistory();
   }
 
@@ -646,10 +649,12 @@
       return String(entry?.destination_path || '').trim();
     }
 
-    return normalizeFolderValue(entry?.folder)
-      || normalizeFolderValue(
+    return (
+      normalizeFolderValue(entry?.folder) ||
+      normalizeFolderValue(
         `${entry?.root_key || ''}${entry?.subdirectory ? `/${entry.subdirectory}` : ''}`,
-      );
+      )
+    );
   }
 
   function renderRootOptions() {
@@ -852,15 +857,17 @@
     const advanced = document.getElementById('dtd-advanced');
 
     if (urlInput) urlInput.value = entry.url || '';
-    if (folderInput) folderInput.value = getEntryPath(entry) || entry.folder || '';
+    if (folderInput)
+      folderInput.value = getEntryPath(entry) || entry.folder || '';
     if (subdirInput) subdirInput.value = entry.subdirectory || '';
     if (filenameInput) filenameInput.value = entry.filename || '';
     if (overwriteInput) overwriteInput.checked = Boolean(entry.overwrite);
 
     if (rootInput) {
-      const candidateValues = [entry.selected_root_value, entry.root_key].filter(
-        (value) => Boolean(value),
-      );
+      const candidateValues = [
+        entry.selected_root_value,
+        entry.root_key,
+      ].filter((value) => Boolean(value));
       for (const candidate of candidateValues) {
         const hasOption = Array.from(rootInput.options).some(
           (opt) => opt.value === candidate,
@@ -912,7 +919,10 @@
     if (Boolean(data.deleted)) {
       setStatus(`Deleted ${deletePath}`, 'success');
     } else {
-      setStatus('File was already missing. Removed entry from history.', 'success');
+      setStatus(
+        'File was already missing. Removed entry from history.',
+        'success',
+      );
     }
   }
 
@@ -968,7 +978,7 @@
     const select = document.getElementById('dtd-root');
     if (!select) return;
 
-    setStatus('Loading destination roots...');
+    setStatus('Loading destinations...');
 
     const resp = await apiFetch('/download-to-dir/roots', { method: 'GET' });
     const data = await resp.json();
@@ -1054,8 +1064,8 @@
       const done = await pollDownloadProgress(jobId, progressToken);
       const mb = Number(done.bytes_written || 0) / (1024 * 1024);
       const recentFolder =
-        normalizeFolderValue(attempt.folder)
-        || normalizeFolderValue(
+        normalizeFolderValue(attempt.folder) ||
+        normalizeFolderValue(
           `${attempt.root_key}${attempt.subdirectory ? `/${attempt.subdirectory}` : ''}`,
         );
       saveRecentFolder(recentFolder);
@@ -1173,7 +1183,7 @@
           </div>
 
           <div class="field">
-            <label>Destination root</label>
+            <label>Destination</label>
             <select id="dtd-root"></select>
           </div>
 
@@ -1272,9 +1282,10 @@
     const historyList = document.getElementById('dtd-history-list');
     if (historyList) {
       historyList.addEventListener('input', (event) => {
-        const input = event.target instanceof Element
-          ? event.target.closest('input[data-action="edit-path"][data-id]')
-          : null;
+        const input =
+          event.target instanceof Element
+            ? event.target.closest('input[data-action="edit-path"][data-id]')
+            : null;
         if (!(input instanceof HTMLInputElement)) return;
         const entryId = input.dataset.id || '';
         const updatedPath = String(input.value || '').trim();
@@ -1287,9 +1298,10 @@
       });
 
       historyList.addEventListener('click', (event) => {
-        const button = event.target instanceof Element
-          ? event.target.closest('button[data-action][data-id]')
-          : null;
+        const button =
+          event.target instanceof Element
+            ? event.target.closest('button[data-action][data-id]')
+            : null;
         if (!button) return;
 
         const action = button.getAttribute('data-action') || '';
