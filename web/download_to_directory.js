@@ -128,13 +128,23 @@
         max-height: min(88vh, 900px);
         overflow: auto;
       }
+      #${DIALOG_ID} .row {
+        --dtd-stack-gap: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: var(--dtd-stack-gap);
+      }
+      #${DIALOG_ID} .field {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
       #${DIALOG_ID} input,
       #${DIALOG_ID} select,
       #${DIALOG_ID} button {
         width: 100%;
         box-sizing: border-box;
-        margin-top: 8px;
-        margin-bottom: 16px;
+        margin: 0;
         border-radius: 12px;
         border: 1px solid var(--p-content-border-color, #434958);
         background: var(--p-surface-800, #232831);
@@ -158,13 +168,8 @@
         font-size: 15px;
         font-weight: 600;
       }
-      #${DIALOG_ID} .row {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 0;
-      }
       #${DIALOG_ID} .status {
-        margin-top: 8px;
+        margin: 0;
         min-height: 22px;
         font-size: 14px;
       }
@@ -177,17 +182,17 @@
       #${DIALOG_ID} .hint {
         color: var(--p-text-muted-color, #a8afbd);
         font-size: 14px;
-        margin-top: 10px;
+        margin: 0;
         line-height: 1.35;
       }
       #${DIALOG_ID} .inline {
         display: flex;
         align-items: center;
         gap: 12px;
-        margin: 6px 0 8px;
+        margin: 0;
       }
       #${DIALOG_ID} details.advanced {
-        margin: 2px 0 14px;
+        margin: 0;
         border: 1px solid var(--p-content-border-color, #434958);
         border-radius: 12px;
         background: var(--p-surface-900, #1a1f27);
@@ -228,7 +233,7 @@
       #${DIALOG_ID} .actions {
         display: flex;
         gap: 12px;
-        margin-top: 8px;
+        margin: 0;
       }
       #${DIALOG_ID} .actions button {
         margin-bottom: 0;
@@ -254,7 +259,7 @@
         background: var(--p-surface-700, #2c323d);
       }
       #${DIALOG_ID} .title {
-        margin: 0 0 12px;
+        margin: 0;
         font-size: 30px;
         line-height: 1.1;
         font-weight: 650;
@@ -733,43 +738,63 @@
       dialog.innerHTML = `
       <div class="body row">
         <h2 class="title">Downloader</h2>
-        <label>File URL</label>
-        <input id="dtd-url" type="text" placeholder="https://example.com/file.bin" />
-
-        <label>Destination root</label>
-        <select id="dtd-root"></select>
-
-        <label>Folder (optional, from ComfyUI root)</label>
-        <input id="dtd-folder" type="text" placeholder="models/checkpoints or custom_nodes/my_extension" />
-
-        <label>Subdirectory (optional)</label>
-        <input id="dtd-subdir" type="text" placeholder="my/models" />
-
-        <label>Filename (optional)</label>
-        <input id="dtd-filename" type="text" placeholder="auto from URL if empty" />
-
-        <label class="inline">
-          <input id="dtd-overwrite" type="checkbox" />
-          Overwrite existing file
-        </label>
-
-        <details class="advanced">
-          <summary>Advanced</summary>
-          <div class="advanced-body">
-            <div class="advanced-note">Allow writing to any folder under ComfyUI root (not only models/ and custom_nodes/).</div>
-            <label class="inline">
-              <input id="dtd-allow-any-folder" type="checkbox" />
-              Allow any ComfyUI-root folder
-            </label>
-          </div>
-        </details>
-
-        <div class="actions">
-          <button id="dtd-submit" type="button">Download</button>
-          <button id="dtd-close" type="button">Close</button>
+        <div class="field">
+          <label>File URL</label>
+          <input id="dtd-url" type="text" placeholder="https://example.com/file.bin" />
         </div>
-        <div class="hint">Only HTTP/HTTPS. Private/localhost targets are blocked by default. If Folder is set, it is relative to your ComfyUI root and overrides Destination root + Subdirectory. For safety, typed folders are limited to models/ or custom_nodes/ by default.</div>
-        <div class="status"></div>
+
+        <div class="field">
+          <label>Destination root</label>
+          <select id="dtd-root"></select>
+        </div>
+
+        <div class="field">
+          <label>Folder (optional, from ComfyUI root)</label>
+          <input id="dtd-folder" type="text" placeholder="models/checkpoints or custom_nodes/my_extension" />
+        </div>
+
+        <div class="field">
+          <label>Subdirectory (optional)</label>
+          <input id="dtd-subdir" type="text" placeholder="my/models" />
+        </div>
+
+        <div class="field">
+          <label>Filename (optional)</label>
+          <input id="dtd-filename" type="text" placeholder="auto from URL if empty" />
+        </div>
+
+        <div class="field">
+          <label class="inline">
+            <input id="dtd-overwrite" type="checkbox" />
+            Overwrite existing file
+          </label>
+        </div>
+
+        <div class="field">
+          <details class="advanced">
+            <summary>Advanced</summary>
+            <div class="advanced-body">
+              <div class="advanced-note">Allow writing to any folder under ComfyUI root (not only models/ and custom_nodes/).</div>
+              <label class="inline">
+                <input id="dtd-allow-any-folder" type="checkbox" />
+                Allow any ComfyUI-root folder
+              </label>
+            </div>
+          </details>
+        </div>
+
+        <div class="field">
+          <div class="actions">
+            <button id="dtd-submit" type="button">Download</button>
+            <button id="dtd-close" type="button">Close</button>
+          </div>
+        </div>
+        <div class="field">
+          <div class="hint">Only HTTP/HTTPS. Private/localhost targets are blocked by default. If Folder is set, it is relative to your ComfyUI root and overrides Destination root + Subdirectory. For safety, typed folders are limited to models/ or custom_nodes/ by default.</div>
+        </div>
+        <div class="field">
+          <div class="status"></div>
+        </div>
       </div>
     `;
       document.body.appendChild(dialog);
