@@ -750,7 +750,7 @@
       removeBtn.type = 'button';
       removeBtn.dataset.action = 'remove-entry';
       removeBtn.dataset.id = entry.id;
-      removeBtn.textContent = 'Remove';
+      removeBtn.textContent = 'Ignore';
       actions.appendChild(removeBtn);
     } else {
       const retryBtn = document.createElement('button');
@@ -1158,14 +1158,14 @@
           </div>
 
           <div class="field">
-            <label>Folder (optional, from ComfyUI root)</label>
-            <input id="dtd-folder" type="text" placeholder="models/checkpoints or any/relative/path" />
-          </div>
-
-          <div class="field">
             <details id="dtd-advanced" class="section advanced">
               <summary>Advanced</summary>
               <div class="advanced-body">
+                <div class="field">
+                  <label>Folder (optional, from ComfyUI root)</label>
+                  <input id="dtd-folder" type="text" placeholder="models/checkpoints or any/relative/path" />
+                </div>
+
                 <div class="field">
                   <label>Subdirectory (optional)</label>
                   <input id="dtd-subdir" type="text" placeholder="my/models" />
@@ -1187,7 +1187,7 @@
           </div>
 
           <div class="field">
-            <details id="dtd-history" class="section history" open>
+            <details id="dtd-history" class="section history">
               <summary>History (Session)</summary>
               <div class="history-body">
                 <p id="dtd-history-empty" class="history-empty">No downloads in this session yet.</p>
