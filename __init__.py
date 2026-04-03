@@ -4,10 +4,14 @@ import os
 import ssl
 import socket
 import tempfile
+import threading
+import time
 import urllib.parse
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
+from typing import Callable
 
 from aiohttp import web
 
@@ -19,6 +23,8 @@ WEB_DIRECTORY = "./web"
 # No node classes; this extension only exposes backend + frontend utilities.
 NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
+DOWNLOAD_JOBS: dict[str, dict] = {}
+DOWNLOAD_JOBS_LOCK = threading.Lock()
 
 
 def _iter_subdirectories(base_path: str) -> list[str]:
@@ -170,7 +176,11 @@ def _open_url_with_ssl_fallback(req: urllib.request.Request, timeout: int = 45):
         return urllib.request.urlopen(req, timeout=timeout, context=ssl_ctx)
 
 
-def _download_file(download_url: str, destination_path: str) -> int:
+def _download_file(
+    download_url: str,
+    destination_path: str,
+    progress_callback: Callable[[int, int | None], None] | None = None,
+) -> tuple[int, int | None]:
     req = urllib.request.Request(
         download_url,
         headers={
@@ -186,6 +196,18 @@ def _download_file(download_url: str, destination_path: str) -> int:
         with _open_url_with_ssl_fallback(req, timeout=45) as response:
             if response.status >= 400:
                 raise web.HTTPBadRequest(reason=f"Download failed with status {response.status}")
+            total_bytes = None
+            content_length = response.headers.get("Content-Length")
+            if content_length:
+                try:
+                    parsed_length = int(content_length)
+                    if parsed_length >= 0:
+                        total_bytes = parsed_length
+                except ValueError:
+                    total_bytes = None
+
+            if progress_callback is not None:
+                progress_callback(0, total_bytes)
 
             with tempfile.NamedTemporaryFile(
                 mode="wb",
@@ -201,9 +223,11 @@ def _download_file(download_url: str, destination_path: str) -> int:
                         break
                     tmp.write(chunk)
                     bytes_written += len(chunk)
+                    if progress_callback is not None:
+                        progress_callback(bytes_written, total_bytes)
 
         os.replace(tmp_file_path, destination_path)
-        return bytes_written
+        return bytes_written, total_bytes
     except Exception:
         if tmp_file_path and os.path.exists(tmp_file_path):
             try:
@@ -213,17 +237,7 @@ def _download_file(download_url: str, destination_path: str) -> int:
         raise
 
 
-@PromptServer.instance.routes.get("/download-to-dir/roots")
-async def list_download_roots(request: web.Request) -> web.Response:
-    roots = _build_root_map()
-    payload = [{"key": key, "path": path} for key, path in roots.items()]
-    return web.json_response({"roots": payload})
-
-
-@PromptServer.instance.routes.post("/download-to-dir")
-async def download_to_directory(request: web.Request) -> web.Response:
-    body = await request.json()
-
+def _prepare_download_request(body: dict) -> dict:
     download_url = str(body.get("url", "")).strip()
     root_key = str(body.get("root_key", "")).strip()
     folder = str(body.get("folder", "")).strip()
@@ -269,8 +283,89 @@ async def download_to_directory(request: web.Request) -> web.Response:
     if os.path.exists(destination_path) and not overwrite:
         raise web.HTTPConflict(reason="Destination file already exists; set overwrite=true to replace it")
 
+    return {
+        "download_url": download_url,
+        "root_key": root_key,
+        "destination_path": destination_path,
+    }
+
+
+def _prune_old_jobs() -> None:
+    now = time.time()
+    with DOWNLOAD_JOBS_LOCK:
+        stale_job_ids = [
+            job_id
+            for job_id, job in DOWNLOAD_JOBS.items()
+            if job.get("status") in {"completed", "failed"} and now - float(job.get("updated_at", now)) > 3600
+        ]
+        for job_id in stale_job_ids:
+            DOWNLOAD_JOBS.pop(job_id, None)
+
+
+def _run_download_job(job_id: str, download_url: str, destination_path: str, root_key: str) -> None:
+    def on_progress(bytes_written: int, total_bytes: int | None) -> None:
+        with DOWNLOAD_JOBS_LOCK:
+            job = DOWNLOAD_JOBS.get(job_id)
+            if not job:
+                return
+            job["status"] = "running"
+            job["bytes_written"] = int(bytes_written)
+            job["total_bytes"] = int(total_bytes) if total_bytes is not None else None
+            job["updated_at"] = time.time()
+
     try:
-        bytes_written = _download_file(download_url, destination_path)
+        bytes_written, total_bytes = _download_file(
+            download_url,
+            destination_path,
+            progress_callback=on_progress,
+        )
+        with DOWNLOAD_JOBS_LOCK:
+            job = DOWNLOAD_JOBS.get(job_id)
+            if not job:
+                return
+            job["status"] = "completed"
+            job["bytes_written"] = int(bytes_written)
+            job["total_bytes"] = int(total_bytes) if total_bytes is not None else None
+            job["destination_path"] = destination_path
+            job["root_key"] = root_key
+            job["error"] = ""
+            job["updated_at"] = time.time()
+    except web.HTTPException as exc:
+        with DOWNLOAD_JOBS_LOCK:
+            job = DOWNLOAD_JOBS.get(job_id)
+            if not job:
+                return
+            job["status"] = "failed"
+            job["error"] = str(exc.reason or exc.text or "Download failed")
+            job["updated_at"] = time.time()
+    except Exception as exc:
+        logging.exception("download-to-dir async failed")
+        with DOWNLOAD_JOBS_LOCK:
+            job = DOWNLOAD_JOBS.get(job_id)
+            if not job:
+                return
+            job["status"] = "failed"
+            job["error"] = str(exc)
+            job["updated_at"] = time.time()
+
+
+@PromptServer.instance.routes.get("/download-to-dir/roots")
+async def list_download_roots(request: web.Request) -> web.Response:
+    roots = _build_root_map()
+    payload = [{"key": key, "path": path} for key, path in roots.items()]
+    return web.json_response({"roots": payload})
+
+
+@PromptServer.instance.routes.post("/download-to-dir")
+async def download_to_directory(request: web.Request) -> web.Response:
+    body = await request.json()
+    prepared = _prepare_download_request(body)
+
+    try:
+        bytes_written, _total_bytes = _download_file(
+            prepared["download_url"],
+            prepared["destination_path"],
+        )
     except web.HTTPException:
         raise
     except Exception as exc:
@@ -280,8 +375,69 @@ async def download_to_directory(request: web.Request) -> web.Response:
     return web.json_response(
         {
             "ok": True,
-            "destination_path": destination_path,
+            "destination_path": prepared["destination_path"],
             "bytes_written": bytes_written,
-            "root_key": root_key,
+            "root_key": prepared["root_key"],
         }
     )
+
+
+@PromptServer.instance.routes.post("/download-to-dir/start")
+async def start_download_to_directory(request: web.Request) -> web.Response:
+    body = await request.json()
+    prepared = _prepare_download_request(body)
+
+    job_id = uuid.uuid4().hex
+    now = time.time()
+    with DOWNLOAD_JOBS_LOCK:
+        DOWNLOAD_JOBS[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "bytes_written": 0,
+            "total_bytes": None,
+            "destination_path": prepared["destination_path"],
+            "root_key": prepared["root_key"],
+            "error": "",
+            "updated_at": now,
+            "started_at": now,
+        }
+
+    threading.Thread(
+        target=_run_download_job,
+        args=(
+            job_id,
+            prepared["download_url"],
+            prepared["destination_path"],
+            prepared["root_key"],
+        ),
+        daemon=True,
+    ).start()
+    _prune_old_jobs()
+
+    return web.json_response(
+        {
+            "ok": True,
+            "job_id": job_id,
+            "destination_path": prepared["destination_path"],
+            "root_key": prepared["root_key"],
+        }
+    )
+
+
+@PromptServer.instance.routes.get("/download-to-dir/progress/{job_id}")
+async def get_download_progress(request: web.Request) -> web.Response:
+    job_id = request.match_info.get("job_id", "").strip()
+    with DOWNLOAD_JOBS_LOCK:
+        job = DOWNLOAD_JOBS.get(job_id)
+        if not job:
+            raise web.HTTPNotFound(reason="Download job not found")
+        payload = dict(job)
+
+    total_bytes = payload.get("total_bytes")
+    bytes_written = int(payload.get("bytes_written", 0))
+    if isinstance(total_bytes, int) and total_bytes > 0:
+        payload["progress_percent"] = min(100.0, max(0.0, (bytes_written / total_bytes) * 100.0))
+    else:
+        payload["progress_percent"] = None
+
+    return web.json_response(payload)

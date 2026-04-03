@@ -7,6 +7,7 @@
     roots: [],
     toggleEl: null,
     dialogEl: null,
+    activeProgressToken: 0,
   };
 
   function ensureStyles() {
@@ -345,6 +346,67 @@
     return raw || fallbackMessage || `Request failed (${status})`;
   }
 
+  function formatBytes(bytes) {
+    const value = Number(bytes || 0);
+    if (!Number.isFinite(value) || value <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const exp = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+    const size = value / 1024 ** exp;
+    return `${size.toFixed(exp >= 2 ? 2 : 1)} ${units[exp]}`;
+  }
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function pollDownloadProgress(jobId, token) {
+    while (token === state.activeProgressToken) {
+      const resp = await apiFetch(`/download-to-dir/progress/${jobId}`, {
+        method: 'GET',
+      });
+      const data = await resp.json().catch(() => ({}));
+
+      if (!resp.ok) {
+        throw new Error(
+          formatApiError(
+            resp.status,
+            data,
+            `Could not read download progress (${resp.status})`,
+          ),
+        );
+      }
+
+      const status = String(data.status || '').toLowerCase();
+      const bytesWritten = Number(data.bytes_written || 0);
+      const totalBytes =
+        data.total_bytes == null ? null : Number(data.total_bytes);
+      const percent = Number(data.progress_percent);
+
+      if (status === 'queued') {
+        setStatus('Queued...');
+      } else if (status === 'running') {
+        if (Number.isFinite(totalBytes) && totalBytes > 0) {
+          const progressPct = Number.isFinite(percent) ? percent.toFixed(1) : '0.0';
+          setStatus(
+            `Downloading... ${formatBytes(bytesWritten)} / ${formatBytes(totalBytes)} (${progressPct}%)`,
+          );
+        } else {
+          setStatus(`Downloading... ${formatBytes(bytesWritten)} downloaded`);
+        }
+      } else if (status === 'completed') {
+        return data;
+      } else if (status === 'failed') {
+        throw new Error(
+          String(data.error || 'Download failed.'),
+        );
+      }
+
+      await sleep(350);
+    }
+
+    throw new Error('Download tracking was replaced by a new request.');
+  }
+
   async function loadRoots() {
     const select = document.getElementById('dtd-root');
     if (!select) return;
@@ -393,13 +455,17 @@
     const url = (urlInput?.value || '').trim();
     const rootKey = (rootInput?.value || '').trim();
     const folder = (folderInput?.value || '').trim();
+    const submitButton = document.getElementById('dtd-submit');
 
     if (!url || (!rootKey && !folder)) {
       setStatus('URL and destination are required.', 'error');
       return;
     }
 
-    setStatus('Downloading... This may take a while.');
+    if (submitButton) submitButton.disabled = true;
+    state.activeProgressToken += 1;
+    const progressToken = state.activeProgressToken;
+    setStatus('Starting download...');
 
     const payload = {
       url,
@@ -410,27 +476,43 @@
       overwrite: Boolean(overwriteInput?.checked),
     };
 
-    const resp = await apiFetch('/download-to-dir', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    try {
+      const startResp = await apiFetch('/download-to-dir/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const startData = await startResp.json().catch(() => ({}));
 
-    const data = await resp.json().catch(() => ({}));
+      if (!startResp.ok) {
+        setStatus(
+          formatApiError(
+            startResp.status,
+            startData,
+            `Download failed (${startResp.status})`,
+          ),
+          'error',
+        );
+        return;
+      }
 
-    if (!resp.ok) {
+      const jobId = String(startData.job_id || '').trim();
+      if (!jobId) {
+        setStatus('Download did not return a tracking job id.', 'error');
+        return;
+      }
+
+      const done = await pollDownloadProgress(jobId, progressToken);
+      const mb = Number(done.bytes_written || 0) / (1024 * 1024);
       setStatus(
-        formatApiError(resp.status, data, `Download failed (${resp.status})`),
-        'error',
+        `Saved to ${done.destination_path} (${mb.toFixed(2)} MB)`,
+        'success',
       );
-      return;
+    } catch (err) {
+      setStatus(err.message || String(err), 'error');
+    } finally {
+      if (submitButton) submitButton.disabled = false;
     }
-
-    const mb = Number(data.bytes_written || 0) / (1024 * 1024);
-    setStatus(
-      `Saved to ${data.destination_path} (${mb.toFixed(2)} MB)`,
-      'success',
-    );
   }
 
   function closeDialogAnimated(dialog) {
