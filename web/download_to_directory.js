@@ -67,8 +67,8 @@
       }
       #${DIALOG_ID} {
         width: min(760px, calc(100vw - 64px));
-        max-height: min(88vh, 900px);
-        overflow: hidden;
+        max-height: calc(100vh - 24px);
+        overflow: visible;
         border: 1px solid var(--p-content-border-color, #343943);
         border-radius: 20px;
         background: var(--p-content-background, #16191f);
@@ -135,7 +135,7 @@
         --dtd-body-pad-x: 18px;
         --dtd-band-bg: var(--p-surface-900, #141922);
         padding: 16px var(--dtd-body-pad-x) 14px;
-        max-height: min(88vh, 900px);
+        max-height: calc(100vh - 24px);
         overflow: auto;
       }
       #${DIALOG_ID} .row {
@@ -782,7 +782,9 @@
     if (destinationName) return destinationName;
     try {
       const parsed = new URL(String(entry?.url || '').trim());
-      const urlName = String(parsed.pathname || '').split('/').pop();
+      const urlName = String(parsed.pathname || '')
+        .split('/')
+        .pop();
       return urlName || 'download.bin';
     } catch {
       return 'download.bin';
@@ -906,7 +908,8 @@
     const sub = document.createElement('div');
     sub.className = 'history-sub';
     const parts = [];
-    const locationLabel = String(entry.destination_path || '').trim() || getEntryPath(entry);
+    const locationLabel =
+      String(entry.destination_path || '').trim() || getEntryPath(entry);
     if (locationLabel) parts.push(locationLabel);
     const progressLabel = formatEntryProgress(entry);
     if (progressLabel) parts.push(progressLabel);
@@ -1084,7 +1087,7 @@
     }
   }
 
-  async function pollDownloadProgress(jobId) {
+  async function pollDownloadProgress(jobId, historyEntryId = jobId) {
     while (true) {
       const resp = await apiFetch(`/download-to-dir/progress/${jobId}`, {
         method: 'GET',
@@ -1106,7 +1109,7 @@
       const totalBytes =
         data.total_bytes == null ? null : Number(data.total_bytes);
       const percent = Number(data.progress_percent);
-      updateHistoryEntry(jobId, {
+      updateHistoryEntry(historyEntryId, {
         status,
         bytes_written: bytesWritten,
         total_bytes: totalBytes,
@@ -1123,37 +1126,28 @@
     }
   }
 
-  async function loadRoots() {
-    const select = document.getElementById('dtd-root');
-    if (!select) return;
-
-    setStatus('Loading destinations...');
-
-    const resp = await apiFetch('/download-to-dir/roots', { method: 'GET' });
-    const data = await resp.json();
-
-    if (!resp.ok) {
-      throw new Error(
-        formatApiError(
-          resp.status,
-          data,
-          `Could not load destination folders (${resp.status})`,
-        ),
-      );
-    }
-
-    state.roots = Array.isArray(data.roots) ? data.roots : [];
-    renderRootOptions();
-
-    if (select.options.length === 0) {
-      setStatus('No writable roots available', 'error');
-    } else {
-      setStatus('Ready.');
-    }
+  function buildRetryAttemptFromEntry(entry) {
+    const formValues = readDownloadFormValues();
+    const retryPath = String(getEntryPath(entry) || '').trim();
+    return {
+      url: String(entry?.url || '').trim(),
+      selected_root_value: '',
+      root_key: '',
+      folder: retryPath,
+      subdirectory: '',
+      filename: String(entry?.filename || entry?.file_name || '').trim(),
+      overwrite: Boolean(entry?.overwrite),
+      huggingface_token: String(formValues?.huggingface_token || '').trim(),
+    };
   }
 
-  async function handleDownload() {
-    const attempt = readDownloadFormValues();
+  async function handleDownload(options = {}) {
+    const attempt =
+      options?.attempt && typeof options.attempt === 'object'
+        ? options.attempt
+        : readDownloadFormValues();
+    const existingEntryId = String(options?.existingEntryId || '').trim();
+    const historyTargetId = existingEntryId || '';
     let trackedJobId = '';
 
     if (!attempt.url || (!attempt.root_key && !attempt.folder)) {
@@ -1191,11 +1185,18 @@
           ),
         );
         setStatus(message, 'error');
-        addHistoryEntry({
-          ...attempt,
-          status: 'failed',
-          error: message,
-        });
+        if (historyTargetId) {
+          updateHistoryEntry(historyTargetId, {
+            status: 'failed',
+            error: message,
+          });
+        } else {
+          addHistoryEntry({
+            ...attempt,
+            status: 'failed',
+            error: message,
+          });
+        }
         return;
       }
 
@@ -1203,31 +1204,43 @@
       if (!jobId) {
         const message = 'Download did not return a tracking job id.';
         setStatus(message, 'error');
-        addHistoryEntry({
-          ...attempt,
-          status: 'failed',
-          error: message,
-        });
+        if (historyTargetId) {
+          updateHistoryEntry(historyTargetId, {
+            status: 'failed',
+            error: message,
+          });
+        } else {
+          addHistoryEntry({
+            ...attempt,
+            status: 'failed',
+            error: message,
+          });
+        }
         return;
       }
 
       trackedJobId = jobId;
-      addHistoryEntry({
-        ...attempt,
-        id: jobId,
-        created_at: Date.now(),
-        status: 'queued',
-        file_name: inferDisplayNameFromEntry({
+      const entryId = historyTargetId || jobId;
+      if (!historyTargetId) {
+        addHistoryEntry({
           ...attempt,
+          id: entryId,
+          created_at: Date.now(),
+          status: 'queued',
+          file_name: inferDisplayNameFromEntry({
+            ...attempt,
+            destination_path: String(startData.destination_path || ''),
+          }),
           destination_path: String(startData.destination_path || ''),
-        }),
-        destination_path: String(startData.destination_path || ''),
-        bytes_written: 0,
-        total_bytes: null,
-        progress_percent: 0,
-        error: '',
-      });
-      updateHistoryEntry(jobId, {
+          bytes_written: 0,
+          total_bytes: null,
+          progress_percent: 0,
+          error: '',
+        });
+      }
+
+      updateHistoryEntry(entryId, {
+        created_at: Date.now(),
         status: 'running',
         bytes_written: 0,
         total_bytes: null,
@@ -1240,7 +1253,7 @@
         error: '',
       });
 
-      const done = await pollDownloadProgress(jobId);
+      const done = await pollDownloadProgress(jobId, entryId);
       const mb = Number(done.bytes_written || 0) / (1024 * 1024);
       const recentFolder =
         normalizeFolderValue(attempt.folder) ||
@@ -1250,7 +1263,7 @@
       saveRecentFolder(recentFolder);
       renderRootOptions();
 
-      updateHistoryEntry(jobId, {
+      updateHistoryEntry(entryId, {
         status: 'success',
         destination_path: String(done.destination_path || ''),
         bytes_written: Number(done.bytes_written || 0),
@@ -1275,12 +1288,12 @@
       );
       setStatus(message, 'error');
       if (trackedJobId) {
-        updateHistoryEntry(trackedJobId, {
+        updateHistoryEntry(historyTargetId || trackedJobId, {
           status: 'failed',
           error: message,
         });
       }
-      if (!trackedJobId) {
+      if (!trackedJobId && !historyTargetId) {
         addHistoryEntry({
           ...attempt,
           status: 'failed',
@@ -1291,6 +1304,59 @@
       // Per-download state persists in the combined list.
     }
   }
+
+  function retryHistoryEntry(entry) {
+    if (!entry) return;
+    const retryAttempt = buildRetryAttemptFromEntry(entry);
+    if (!retryAttempt.url || !retryAttempt.folder) {
+      setStatus('Retry requires a URL and destination path.', 'error');
+      return;
+    }
+
+    updateHistoryEntry(entry.id, {
+      created_at: Date.now(),
+      status: 'queued',
+      bytes_written: 0,
+      total_bytes: null,
+      progress_percent: 0,
+      error: '',
+    });
+
+    handleDownload({
+      attempt: retryAttempt,
+      existingEntryId: entry.id,
+    }).catch((err) => setStatus(err?.message || String(err), 'error'));
+  }
+
+  async function loadRoots() {
+    const select = document.getElementById('dtd-root');
+    if (!select) return;
+
+    setStatus('Loading destinations...');
+
+    const resp = await apiFetch('/download-to-dir/roots', { method: 'GET' });
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      throw new Error(
+        formatApiError(
+          resp.status,
+          data,
+          `Could not load destination folders (${resp.status})`,
+        ),
+      );
+    }
+
+    state.roots = Array.isArray(data.roots) ? data.roots : [];
+    renderRootOptions();
+
+    if (select.options.length === 0) {
+      setStatus('No writable roots available', 'error');
+    } else {
+      setStatus('Ready.');
+    }
+  }
+
 
   async function triggerNodeDefinitionsRefresh() {
     const commandId = 'Comfy.RefreshNodeDefinitions';
@@ -1416,8 +1482,8 @@
           </div>
 
           <div class="field">
-            <details class="section history">
-              <summary>Active Downloaders</summary>
+            <details class="section history" open>
+              <summary>Downloads</summary>
               <div class="history-body">
                 <p id="dtd-history-empty" class="history-empty">No downloads yet.</p>
                 <div id="dtd-history-list" class="history-list"></div>
@@ -1523,7 +1589,7 @@
         }
 
         if (action === 'retry-entry') {
-          prefillFromHistory(entry);
+          retryHistoryEntry(entry);
           return;
         }
 
