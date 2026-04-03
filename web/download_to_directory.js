@@ -309,12 +309,6 @@
         flex-direction: column;
         gap: 6px;
       }
-      #${DIALOG_ID} .history-item.success {
-        border-color: color-mix(in srgb, #6de4a0 45%, var(--p-content-border-color, #434958));
-      }
-      #${DIALOG_ID} .history-item.failed {
-        border-color: color-mix(in srgb, #ff8f9d 45%, var(--p-content-border-color, #434958));
-      }
       #${DIALOG_ID} .history-top {
         display: flex;
         align-items: center;
@@ -347,6 +341,18 @@
         line-height: 1.35;
         color: var(--p-text-muted-color, #a8afbd);
         overflow-wrap: anywhere;
+      }
+      #${DIALOG_ID} .history-path-input {
+        margin: 0;
+        width: 100%;
+        height: 34px;
+        border-radius: 8px;
+        border: 1px solid var(--p-content-border-color, #434958);
+        background: var(--p-surface-900, #1a1f27);
+        color: var(--p-text-color, #f5f7fb);
+        padding: 6px 10px;
+        font-size: 12px;
+        line-height: 1.3;
       }
       #${DIALOG_ID} .history-actions {
         display: flex;
@@ -600,6 +606,7 @@
       filename: String(entry?.filename || '').trim(),
       overwrite: Boolean(entry?.overwrite),
       destination_path: String(entry?.destination_path || '').trim(),
+      path: String(entry?.path || '').trim(),
       bytes_written: Number(entry?.bytes_written || 0),
       error: String(entry?.error || '').trim(),
     };
@@ -629,6 +636,20 @@
     } catch {
       return '';
     }
+  }
+
+  function getEntryPath(entry) {
+    const explicit = String(entry?.path || '').trim();
+    if (explicit) return explicit;
+
+    if (entry?.status === 'success') {
+      return String(entry?.destination_path || '').trim();
+    }
+
+    return normalizeFolderValue(entry?.folder)
+      || normalizeFolderValue(
+        `${entry?.root_key || ''}${entry?.subdirectory ? `/${entry.subdirectory}` : ''}`,
+      );
   }
 
   function renderRootOptions() {
@@ -724,15 +745,19 @@
     sub.className = 'history-sub';
     const parts = [];
     if (entry.url) parts.push(entry.url);
-    const folderLabel = normalizeFolderValue(entry.folder)
-      || normalizeFolderValue(
-        `${entry.root_key || ''}${entry.subdirectory ? `/${entry.subdirectory}` : ''}`,
-      );
+    const folderLabel = getEntryPath(entry);
     if (folderLabel) parts.push(`to ${folderLabel}`);
     if (entry.status === 'success' && Number(entry.bytes_written) > 0) {
       parts.push(formatBytes(entry.bytes_written));
     }
     sub.textContent = parts.join(' • ');
+
+    const pathInput = document.createElement('input');
+    pathInput.type = 'text';
+    pathInput.className = 'history-path-input';
+    pathInput.dataset.action = 'edit-path';
+    pathInput.dataset.id = entry.id;
+    pathInput.value = getEntryPath(entry);
 
     const actions = document.createElement('div');
     actions.className = 'history-actions';
@@ -761,7 +786,7 @@
       actions.appendChild(removeBtn);
     }
 
-    item.append(top, main, sub, actions);
+    item.append(top, main, sub, pathInput, actions);
     return item;
   }
 
@@ -826,7 +851,7 @@
     const advanced = document.getElementById('dtd-advanced');
 
     if (urlInput) urlInput.value = entry.url || '';
-    if (folderInput) folderInput.value = entry.folder || '';
+    if (folderInput) folderInput.value = getEntryPath(entry) || entry.folder || '';
     if (subdirInput) subdirInput.value = entry.subdirectory || '';
     if (filenameInput) filenameInput.value = entry.filename || '';
     if (overwriteInput) overwriteInput.checked = Boolean(entry.overwrite);
@@ -857,13 +882,14 @@
   }
 
   async function deleteFileFromHistory(entry) {
-    if (!entry?.destination_path) {
+    const deletePath = getEntryPath(entry);
+    if (!deletePath) {
       setStatus('This history entry does not have a saved file path.', 'error');
       return;
     }
 
     const confirmed = window.confirm(
-      `Delete this file from disk?\n\n${entry.destination_path}`,
+      `Delete this file from disk?\n\n${deletePath}`,
     );
     if (!confirmed) return;
 
@@ -871,7 +897,7 @@
     const resp = await apiFetch('/download-to-dir/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: entry.destination_path }),
+      body: JSON.stringify({ path: deletePath }),
     });
     const data = await resp.json().catch(() => ({}));
 
@@ -883,7 +909,7 @@
 
     removeHistoryEntry(entry.id);
     if (Boolean(data.deleted)) {
-      setStatus(`Deleted ${entry.destination_path}`, 'success');
+      setStatus(`Deleted ${deletePath}`, 'success');
     } else {
       setStatus('File was already missing. Removed entry from history.', 'success');
     }
@@ -1244,6 +1270,21 @@
 
     const historyList = document.getElementById('dtd-history-list');
     if (historyList) {
+      historyList.addEventListener('input', (event) => {
+        const input = event.target instanceof Element
+          ? event.target.closest('input[data-action="edit-path"][data-id]')
+          : null;
+        if (!(input instanceof HTMLInputElement)) return;
+        const entryId = input.dataset.id || '';
+        const updatedPath = String(input.value || '').trim();
+        writeHistoryEntries(
+          state.historyEntries.map((entry) => {
+            if (entry.id !== entryId) return entry;
+            return { ...entry, path: updatedPath };
+          }),
+        );
+      });
+
       historyList.addEventListener('click', (event) => {
         const button = event.target instanceof Element
           ? event.target.closest('button[data-action][data-id]')
