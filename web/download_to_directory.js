@@ -752,13 +752,6 @@
     }
     sub.textContent = parts.join(' • ');
 
-    const pathInput = document.createElement('input');
-    pathInput.type = 'text';
-    pathInput.className = 'history-path-input';
-    pathInput.dataset.action = 'edit-path';
-    pathInput.dataset.id = entry.id;
-    pathInput.value = getEntryPath(entry);
-
     const actions = document.createElement('div');
     actions.className = 'history-actions';
 
@@ -771,6 +764,14 @@
       deleteBtn.textContent = 'Delete from disk';
       actions.appendChild(deleteBtn);
     } else {
+      const pathInput = document.createElement('input');
+      pathInput.type = 'text';
+      pathInput.className = 'history-path-input';
+      pathInput.dataset.action = 'edit-path';
+      pathInput.dataset.id = entry.id;
+      pathInput.value = getEntryPath(entry);
+      item.append(pathInput);
+
       const retryBtn = document.createElement('button');
       retryBtn.type = 'button';
       retryBtn.dataset.action = 'retry-entry';
@@ -786,7 +787,7 @@
       actions.appendChild(removeBtn);
     }
 
-    item.append(top, main, sub, pathInput, actions);
+    item.append(top, main, sub, actions);
     return item;
   }
 
