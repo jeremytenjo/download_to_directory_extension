@@ -191,6 +191,7 @@
       }
       #${DIALOG_ID} label {
         display: block;
+        margin-bottom: 2px;
         color: var(--p-text-color, #f5f7fb);
         font-size: 14px;
         font-weight: 600;
@@ -318,8 +319,14 @@
   function setStatus(message, type = '') {
     const status = document.querySelector(`#${DIALOG_ID} .status`);
     if (!status) return;
+    const normalized = String(message || '')
+      .trim()
+      .replace(/\.$/, '')
+      .toLowerCase();
+    const hideStatus = normalized === 'ready';
+    status.hidden = hideStatus;
     status.className = `status ${type}`.trim();
-    status.textContent = message;
+    status.textContent = hideStatus ? '' : message;
   }
 
   function findActionbarMountNode() {
