@@ -27,6 +27,16 @@ DOWNLOAD_JOBS: dict[str, dict] = {}
 DOWNLOAD_JOBS_LOCK = threading.Lock()
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+ALLOW_COMFY_ROOT_WRITE = _env_flag("DOWNLOAD_TO_DIR_ALLOW_COMFY_ROOT_WRITE", default=False)
+
+
 def _iter_subdirectories(base_path: str) -> list[str]:
     if not os.path.isdir(base_path):
         return []
@@ -86,6 +96,10 @@ def _safe_path_from_root(root_path: str, relative_path: str) -> str:
     if not _is_within_root(target, root_path):
         raise web.HTTPBadRequest(reason="Requested path escapes the selected root directory")
     return target
+
+
+def _is_within_any_root(candidate_path: str, allowed_roots: list[str]) -> bool:
+    return any(_is_within_root(candidate_path, root) for root in allowed_roots)
 
 
 def _sanitize_filename(name: str) -> str:
@@ -245,6 +259,7 @@ def _prepare_download_request(body: dict) -> dict:
     filename = str(body.get("filename", "")).strip()
     overwrite = bool(body.get("overwrite", False))
     allow_private_hosts = bool(body.get("allow_private_hosts", False))
+    allow_comfy_root_write = bool(body.get("allow_comfy_root_write", False))
 
     if not download_url:
         raise web.HTTPBadRequest(reason="Missing required field: url")
@@ -279,6 +294,23 @@ def _prepare_download_request(body: dict) -> dict:
         safe_filename = _filename_from_url(download_url)
 
     destination_path = _safe_path_from_root(target_dir, safe_filename)
+
+    # Public-safe default:
+    # If user types a custom folder (which routes through Comfy root),
+    # only permit models/* and custom_nodes/* unless explicit override is enabled.
+    if root_key == "comfy_root" and not (allow_comfy_root_write or ALLOW_COMFY_ROOT_WRITE):
+        allowed_roots = [
+            roots.get("models", ""),
+            *(path for key, path in roots.items() if key == "custom_nodes" or key.startswith("custom_nodes_")),
+        ]
+        allowed_roots = [path for path in allowed_roots if path]
+        if not _is_within_any_root(destination_path, allowed_roots):
+            raise web.HTTPBadRequest(
+                reason=(
+                    "Folder must be inside models/ or custom_nodes/. "
+                    "Set DOWNLOAD_TO_DIR_ALLOW_COMFY_ROOT_WRITE=1 to allow broader ComfyUI root writes."
+                )
+            )
 
     if os.path.exists(destination_path) and not overwrite:
         raise web.HTTPConflict(reason="Destination file already exists; set overwrite=true to replace it")
@@ -352,7 +384,8 @@ def _run_download_job(job_id: str, download_url: str, destination_path: str, roo
 @PromptServer.instance.routes.get("/download-to-dir/roots")
 async def list_download_roots(request: web.Request) -> web.Response:
     roots = _build_root_map()
-    payload = [{"key": key, "path": path} for key, path in roots.items()]
+    # Do not expose Comfy root as a direct selectable root in public UI.
+    payload = [{"key": key, "path": path} for key, path in roots.items() if key != "comfy_root"]
     return web.json_response({"roots": payload})
 
 

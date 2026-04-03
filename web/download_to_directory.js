@@ -329,6 +329,9 @@
     if (status === 400 && msg.includes('private or localhost')) {
       return 'This URL points to a private/local address, which is blocked for safety.';
     }
+    if (status === 400 && msg.includes('folder must be inside models/ or custom_nodes/')) {
+      return 'Folder must be inside models/ or custom_nodes/ (relative to ComfyUI root).';
+    }
     if (status === 400 && msg.includes('only http/https')) {
       return 'Only HTTP/HTTPS links are supported.';
     }
@@ -710,7 +713,7 @@
           <button id="dtd-submit" type="button">Download</button>
           <button id="dtd-close" type="button">Close</button>
         </div>
-        <div class="hint">Only HTTP/HTTPS. Private/localhost targets are blocked by default. If Folder is set, it is relative to your ComfyUI root and overrides Destination root + Subdirectory.</div>
+        <div class="hint">Only HTTP/HTTPS. Private/localhost targets are blocked by default. If Folder is set, it is relative to your ComfyUI root and overrides Destination root + Subdirectory. For safety, typed folders are limited to models/ or custom_nodes/ by default.</div>
         <div class="status"></div>
       </div>
     `;
