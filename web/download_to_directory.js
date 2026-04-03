@@ -14,7 +14,9 @@
     roots: [],
     toggleEl: null,
     dialogEl: null,
-    activeProgressToken: 0,
+    statusJobId: '',
+    activeDownloadCount: 0,
+    activeJobs: {},
     historyEntries: [],
   };
 
@@ -301,6 +303,47 @@
         padding: 0 12px 10px;
         max-height: min(42vh, 360px);
         overflow: auto;
+      }
+      #${DIALOG_ID} .active-body {
+        padding: 0 12px 10px;
+        max-height: min(35vh, 300px);
+        overflow: auto;
+      }
+      #${DIALOG_ID} .active-empty {
+        margin: 0;
+        color: var(--p-text-muted-color, #a8afbd);
+        font-size: 13px;
+        padding: 2px 0;
+      }
+      #${DIALOG_ID} .active-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      #${DIALOG_ID} .active-item {
+        border: 1px solid var(--p-content-border-color, #434958);
+        border-radius: 10px;
+        padding: 10px;
+        background: var(--p-surface-800, #232831);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      #${DIALOG_ID} .active-main {
+        font-size: 13px;
+        line-height: 1.35;
+        color: var(--p-text-color, #f5f7fb);
+      }
+      #${DIALOG_ID} .active-sub {
+        font-size: 12px;
+        line-height: 1.35;
+        color: var(--p-text-muted-color, #a8afbd);
+        overflow-wrap: anywhere;
+      }
+      #${DIALOG_ID} .active-progress {
+        font-size: 12px;
+        line-height: 1.35;
+        color: var(--p-text-color, #f5f7fb);
       }
       #${DIALOG_ID} .history-empty {
         margin: 0;
@@ -904,6 +947,93 @@
     }
   }
 
+  function inferActiveDisplayName(url, destinationPath) {
+    const destinationName = String(destinationPath || '').trim().split('/').pop();
+    if (destinationName) return destinationName;
+    try {
+      const parsed = new URL(String(url || '').trim());
+      const urlName = String(parsed.pathname || '').split('/').pop();
+      return urlName || 'download.bin';
+    } catch {
+      return 'download.bin';
+    }
+  }
+
+  function formatActiveProgress(status, bytesWritten, totalBytes, percent) {
+    const normalizedStatus = String(status || '').toLowerCase();
+    if (normalizedStatus === 'queued') return 'Queued...';
+    if (normalizedStatus === 'failed') return 'Failed';
+    if (normalizedStatus === 'completed') return 'Completed';
+
+    const current = Number(bytesWritten || 0);
+    const total = totalBytes == null ? null : Number(totalBytes);
+    const pct = Number(percent);
+    if (Number.isFinite(total) && total > 0) {
+      const progressPct = Number.isFinite(pct)
+        ? pct.toFixed(1)
+        : ((current / total) * 100).toFixed(1);
+      return `${formatBytes(current)} / ${formatBytes(total)} (${progressPct}%)`;
+    }
+    return `${formatBytes(current)} downloaded`;
+  }
+
+  function updateActiveJob(jobId, patch) {
+    const id = String(jobId || '').trim();
+    if (!id) return;
+    const current = state.activeJobs[id] || { job_id: id };
+    state.activeJobs[id] = { ...current, ...patch, job_id: id };
+    renderActiveDownloads();
+  }
+
+  function removeActiveJob(jobId) {
+    const id = String(jobId || '').trim();
+    if (!id || !state.activeJobs[id]) return;
+    delete state.activeJobs[id];
+    renderActiveDownloads();
+  }
+
+  function renderActiveDownloads() {
+    const activeList = document.getElementById('dtd-active-list');
+    const emptyEl = document.getElementById('dtd-active-empty');
+    if (!activeList || !emptyEl) return;
+
+    const jobs = Object.values(state.activeJobs || {}).sort(
+      (a, b) => Number(b.started_at || 0) - Number(a.started_at || 0),
+    );
+
+    activeList.innerHTML = '';
+    if (jobs.length === 0) {
+      emptyEl.hidden = false;
+      return;
+    }
+
+    emptyEl.hidden = true;
+    for (const job of jobs) {
+      const item = document.createElement('div');
+      item.className = 'active-item';
+
+      const main = document.createElement('div');
+      main.className = 'active-main';
+      main.textContent = job.file_name || 'download.bin';
+
+      const sub = document.createElement('div');
+      sub.className = 'active-sub';
+      sub.textContent = job.destination_path || 'Preparing destination...';
+
+      const progress = document.createElement('div');
+      progress.className = 'active-progress';
+      progress.textContent = formatActiveProgress(
+        job.status,
+        job.bytes_written,
+        job.total_bytes,
+        job.progress_percent,
+      );
+
+      item.append(main, sub, progress);
+      activeList.appendChild(item);
+    }
+  }
+
   function readDownloadFormValues() {
     const urlInput = document.getElementById('dtd-url');
     const rootInput = document.getElementById('dtd-root');
@@ -1019,8 +1149,13 @@
     }
   }
 
-  async function pollDownloadProgress(jobId, token) {
-    while (token === state.activeProgressToken) {
+  function setStatusForJob(jobId, message, type = '') {
+    if (state.statusJobId && state.statusJobId !== jobId) return;
+    setStatus(message, type);
+  }
+
+  async function pollDownloadProgress(jobId) {
+    while (true) {
       const resp = await apiFetch(`/download-to-dir/progress/${jobId}`, {
         method: 'GET',
       });
@@ -1041,19 +1176,29 @@
       const totalBytes =
         data.total_bytes == null ? null : Number(data.total_bytes);
       const percent = Number(data.progress_percent);
+      updateActiveJob(jobId, {
+        status,
+        bytes_written: bytesWritten,
+        total_bytes: totalBytes,
+        progress_percent: Number.isFinite(percent) ? percent : null,
+      });
 
       if (status === 'queued') {
-        setStatus('Queued...');
+        setStatusForJob(jobId, 'Queued...');
       } else if (status === 'running') {
         if (Number.isFinite(totalBytes) && totalBytes > 0) {
           const progressPct = Number.isFinite(percent)
             ? percent.toFixed(1)
             : '0.0';
-          setStatus(
+          setStatusForJob(
+            jobId,
             `Downloading... ${formatBytes(bytesWritten)} / ${formatBytes(totalBytes)} (${progressPct}%)`,
           );
         } else {
-          setStatus(`Downloading... ${formatBytes(bytesWritten)} downloaded`);
+          setStatusForJob(
+            jobId,
+            `Downloading... ${formatBytes(bytesWritten)} downloaded`,
+          );
         }
       } else if (status === 'completed') {
         return data;
@@ -1063,8 +1208,6 @@
 
       await sleep(350);
     }
-
-    throw new Error('Download tracking was replaced by a new request.');
   }
 
   async function loadRoots() {
@@ -1097,17 +1240,14 @@
   }
 
   async function handleDownload() {
-    const submitButton = document.getElementById('dtd-submit');
     const attempt = readDownloadFormValues();
+    let trackedJobId = '';
 
     if (!attempt.url || (!attempt.root_key && !attempt.folder)) {
       setStatus('URL and destination are required.', 'error');
       return;
     }
 
-    if (submitButton) submitButton.disabled = true;
-    state.activeProgressToken += 1;
-    const progressToken = state.activeProgressToken;
     setStatus('Starting download...');
 
     const payload = {
@@ -1158,7 +1298,24 @@
         return;
       }
 
-      const done = await pollDownloadProgress(jobId, progressToken);
+      trackedJobId = jobId;
+      state.statusJobId = jobId;
+      state.activeDownloadCount += 1;
+      updateActiveJob(jobId, {
+        started_at: Date.now(),
+        status: 'queued',
+        bytes_written: 0,
+        total_bytes: null,
+        progress_percent: 0,
+        destination_path: String(startData.destination_path || ''),
+        file_name: inferActiveDisplayName(
+          attempt.url,
+          String(startData.destination_path || ''),
+        ),
+      });
+      setStatus('Download started. You can queue another file now.');
+
+      const done = await pollDownloadProgress(jobId);
       const mb = Number(done.bytes_written || 0) / (1024 * 1024);
       const recentFolder =
         normalizeFolderValue(attempt.folder) ||
@@ -1179,7 +1336,8 @@
       const refreshSuffix = refreshResult
         ? ' Node definitions refreshed.'
         : ' Download complete. Press R to refresh node definitions.';
-      setStatus(
+      setStatusForJob(
+        jobId,
         `Saved to ${done.destination_path} (${mb.toFixed(2)} MB).${refreshSuffix}`,
         'success',
       );
@@ -1188,14 +1346,24 @@
         attempt.url,
         err?.message || String(err),
       );
-      setStatus(message, 'error');
+      if (trackedJobId) {
+        setStatusForJob(trackedJobId, message, 'error');
+      } else {
+        setStatus(message, 'error');
+      }
       addHistoryEntry({
         ...attempt,
         status: 'failed',
         error: message,
       });
     } finally {
-      if (submitButton) submitButton.disabled = false;
+      if (trackedJobId) {
+        state.activeDownloadCount = Math.max(0, state.activeDownloadCount - 1);
+        removeActiveJob(trackedJobId);
+      }
+      if (trackedJobId && state.statusJobId === trackedJobId) {
+        state.statusJobId = '';
+      }
     }
   }
 
@@ -1331,6 +1499,16 @@
               </div>
             </details>
           </div>
+
+          <div class="field">
+            <details id="dtd-active" class="section active" open>
+              <summary>Active Downloads</summary>
+              <div class="active-body">
+                <p id="dtd-active-empty" class="active-empty">No active downloads.</p>
+                <div id="dtd-active-list" class="active-list"></div>
+              </div>
+            </details>
+          </div>
         </div>
 
         <div class="divider bleed"></div>
@@ -1382,6 +1560,7 @@
     }
 
     renderHistory();
+    renderActiveDownloads();
 
     const rootSelect = document.getElementById('dtd-root');
     const folderInput = document.getElementById('dtd-folder');
