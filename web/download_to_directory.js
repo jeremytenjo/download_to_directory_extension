@@ -2,7 +2,10 @@
   const DIALOG_ID = 'download-to-directory-dialog';
   const BUTTON_ID = 'download-to-directory-button';
   const RECENT_FOLDERS_KEY = 'download-to-directory-recent-folders-v1';
+  const ADVANCED_OPEN_KEY = 'download-to-directory-advanced-open-v1';
+  const HISTORY_KEY = 'download-to-directory-history-v1';
   const MAX_RECENT_FOLDERS = 8;
+  const MAX_HISTORY_ITEMS = 100;
 
   const state = {
     apiPrefix: '/api',
@@ -10,6 +13,7 @@
     toggleEl: null,
     dialogEl: null,
     activeProgressToken: 0,
+    historyEntries: [],
   };
 
   function ensureStyles() {
@@ -58,7 +62,7 @@
         font-size: 16px;
       }
       #${DIALOG_ID} {
-        width: min(720px, calc(100vw - 64px));
+        width: min(760px, calc(100vw - 64px));
         max-height: min(88vh, 900px);
         overflow: hidden;
         border: 1px solid var(--p-content-border-color, #343943);
@@ -207,26 +211,20 @@
       #${DIALOG_ID} .status.success {
         color: #6de4a0;
       }
-      #${DIALOG_ID} .hint {
-        color: var(--p-text-muted-color, #a8afbd);
-        font-size: 13px;
-        margin: 0;
-        line-height: 1.35;
-      }
       #${DIALOG_ID} .inline {
         display: flex;
         align-items: center;
         gap: 10px;
         margin: 0;
       }
-      #${DIALOG_ID} details.advanced {
+      #${DIALOG_ID} details.section {
         margin: 0;
         border: 1px solid var(--p-content-border-color, #434958);
         border-radius: 12px;
         background: var(--p-surface-900, #1a1f27);
         overflow: hidden;
       }
-      #${DIALOG_ID} details.advanced > summary {
+      #${DIALOG_ID} details.section > summary {
         cursor: pointer;
         list-style: none;
         padding: 9px 12px;
@@ -235,18 +233,14 @@
         color: var(--p-text-color, #f5f7fb);
         user-select: none;
       }
-      #${DIALOG_ID} details.advanced > summary::-webkit-details-marker {
+      #${DIALOG_ID} details.section > summary::-webkit-details-marker {
         display: none;
       }
       #${DIALOG_ID} .advanced-body {
         padding: 0 12px 10px;
-      }
-      #${DIALOG_ID} .advanced-note {
-        margin-top: -2px;
-        margin-bottom: 8px;
-        color: var(--p-text-muted-color, #a8afbd);
-        font-size: 12px;
-        line-height: 1.3;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
       }
       #${DIALOG_ID} .inline input[type="checkbox"] {
         margin: 0;
@@ -292,6 +286,85 @@
         line-height: 1.1;
         font-weight: 650;
       }
+      #${DIALOG_ID} .history-body {
+        padding: 0 12px 10px;
+      }
+      #${DIALOG_ID} .history-empty {
+        margin: 0;
+        color: var(--p-text-muted-color, #a8afbd);
+        font-size: 13px;
+        padding: 2px 0;
+      }
+      #${DIALOG_ID} .history-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      #${DIALOG_ID} .history-item {
+        border: 1px solid var(--p-content-border-color, #434958);
+        border-radius: 10px;
+        padding: 10px;
+        background: var(--p-surface-800, #232831);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      #${DIALOG_ID} .history-item.success {
+        border-color: color-mix(in srgb, #6de4a0 45%, var(--p-content-border-color, #434958));
+      }
+      #${DIALOG_ID} .history-item.failed {
+        border-color: color-mix(in srgb, #ff8f9d 45%, var(--p-content-border-color, #434958));
+      }
+      #${DIALOG_ID} .history-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      #${DIALOG_ID} .history-status {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+      }
+      #${DIALOG_ID} .history-status.success {
+        color: #6de4a0;
+      }
+      #${DIALOG_ID} .history-status.failed {
+        color: #ff8f9d;
+      }
+      #${DIALOG_ID} .history-time {
+        font-size: 12px;
+        color: var(--p-text-muted-color, #a8afbd);
+      }
+      #${DIALOG_ID} .history-main {
+        font-size: 13px;
+        line-height: 1.35;
+        color: var(--p-text-color, #f5f7fb);
+      }
+      #${DIALOG_ID} .history-sub {
+        font-size: 12px;
+        line-height: 1.35;
+        color: var(--p-text-muted-color, #a8afbd);
+        overflow-wrap: anywhere;
+      }
+      #${DIALOG_ID} .history-actions {
+        display: flex;
+        gap: 8px;
+      }
+      #${DIALOG_ID} .history-actions button {
+        width: auto;
+        min-width: 0;
+        padding: 6px 10px;
+        height: 32px;
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      #${DIALOG_ID} .history-actions .danger {
+        border-color: color-mix(in srgb, #ff8f9d 50%, var(--p-content-border-color, #434958));
+      }
     `;
 
     document.head.appendChild(style);
@@ -327,6 +400,34 @@
     status.hidden = hideStatus;
     status.className = `status ${type}`.trim();
     status.textContent = hideStatus ? '' : message;
+  }
+
+  function readSessionJson(key, fallback) {
+    try {
+      const raw = sessionStorage.getItem(key);
+      if (!raw) return fallback;
+      const parsed = JSON.parse(raw);
+      return parsed == null ? fallback : parsed;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function writeSessionJson(key, value) {
+    try {
+      sessionStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // Ignore session storage failures.
+    }
+  }
+
+  function readSessionBoolean(key, fallback = false) {
+    const value = readSessionJson(key, fallback);
+    return typeof value === 'boolean' ? value : fallback;
+  }
+
+  function writeSessionBoolean(key, value) {
+    writeSessionJson(key, Boolean(value));
   }
 
   function findActionbarMountNode() {
@@ -396,17 +497,14 @@
     if (status === 409) {
       return 'A file with that name already exists. Enable "Overwrite existing file" or choose a different filename/subdirectory.';
     }
-    if (status === 400 && msg.includes('private or localhost')) {
-      return 'This URL points to a private/local address, which is blocked for safety.';
-    }
-    if (
-      status === 400 &&
-      msg.includes('folder must be inside models/ or custom_nodes/')
-    ) {
-      return 'Folder must be inside models/ or custom_nodes/ (relative to ComfyUI root).';
-    }
     if (status === 400 && msg.includes('only http/https')) {
       return 'Only HTTP/HTTPS links are supported.';
+    }
+    if (status === 400 && msg.includes('outside allowed comfyui roots')) {
+      return 'That file is outside allowed ComfyUI roots and cannot be deleted.';
+    }
+    if (status === 400 && msg.includes('directory')) {
+      return 'Only files can be deleted from history.';
     }
     if (msg.includes('certificate verify failed')) {
       return 'Secure connection failed while validating the site certificate. Install/update certificates in your Python environment and try again.';
@@ -466,6 +564,71 @@
       ...readRecentFolders().filter((f) => f !== normalized),
     ];
     writeRecentFolders(deduped);
+  }
+
+  function readHistoryEntries() {
+    const parsed = readSessionJson(HISTORY_KEY, []);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((entry) => entry && typeof entry === 'object')
+      .slice(0, MAX_HISTORY_ITEMS);
+  }
+
+  function writeHistoryEntries(entries) {
+    const sanitized = Array.isArray(entries)
+      ? entries.filter((entry) => entry && typeof entry === 'object')
+      : [];
+    state.historyEntries = sanitized.slice(0, MAX_HISTORY_ITEMS);
+    writeSessionJson(HISTORY_KEY, state.historyEntries);
+  }
+
+  function addHistoryEntry(entry) {
+    const record = {
+      id:
+        entry?.id && String(entry.id).trim()
+          ? String(entry.id).trim()
+          : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      created_at: Number(entry?.created_at || Date.now()),
+      status: String(entry?.status || 'failed').toLowerCase() === 'success'
+        ? 'success'
+        : 'failed',
+      url: String(entry?.url || '').trim(),
+      selected_root_value: String(entry?.selected_root_value || '').trim(),
+      root_key: String(entry?.root_key || '').trim(),
+      folder: String(entry?.folder || '').trim(),
+      subdirectory: String(entry?.subdirectory || '').trim(),
+      filename: String(entry?.filename || '').trim(),
+      overwrite: Boolean(entry?.overwrite),
+      destination_path: String(entry?.destination_path || '').trim(),
+      bytes_written: Number(entry?.bytes_written || 0),
+      error: String(entry?.error || '').trim(),
+    };
+
+    writeHistoryEntries([record, ...state.historyEntries]);
+    renderHistory();
+  }
+
+  function removeHistoryEntry(entryId) {
+    const id = String(entryId || '').trim();
+    if (!id) return;
+    writeHistoryEntries(state.historyEntries.filter((entry) => entry.id !== id));
+    renderHistory();
+  }
+
+  function getHistoryEntry(entryId) {
+    const id = String(entryId || '').trim();
+    if (!id) return null;
+    return state.historyEntries.find((entry) => entry.id === id) || null;
+  }
+
+  function formatTimestamp(ms) {
+    const value = Number(ms || 0);
+    if (!Number.isFinite(value) || value <= 0) return '';
+    try {
+      return new Date(value).toLocaleString();
+    } catch {
+      return '';
+    }
   }
 
   function renderRootOptions() {
@@ -530,6 +693,207 @@
 
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function createHistoryItemElement(entry) {
+    const item = document.createElement('div');
+    item.className = `history-item ${entry.status}`;
+
+    const top = document.createElement('div');
+    top.className = 'history-top';
+
+    const status = document.createElement('span');
+    status.className = `history-status ${entry.status}`;
+    status.textContent = entry.status === 'success' ? 'Success' : 'Failed';
+
+    const time = document.createElement('span');
+    time.className = 'history-time';
+    time.textContent = formatTimestamp(entry.created_at);
+
+    top.append(status, time);
+
+    const main = document.createElement('div');
+    main.className = 'history-main';
+    if (entry.status === 'success') {
+      main.textContent = entry.destination_path || 'Downloaded file';
+    } else {
+      main.textContent = entry.error || 'Download failed';
+    }
+
+    const sub = document.createElement('div');
+    sub.className = 'history-sub';
+    const parts = [];
+    if (entry.url) parts.push(entry.url);
+    const folderLabel = normalizeFolderValue(entry.folder)
+      || normalizeFolderValue(
+        `${entry.root_key || ''}${entry.subdirectory ? `/${entry.subdirectory}` : ''}`,
+      );
+    if (folderLabel) parts.push(`to ${folderLabel}`);
+    if (entry.status === 'success' && Number(entry.bytes_written) > 0) {
+      parts.push(formatBytes(entry.bytes_written));
+    }
+    sub.textContent = parts.join(' • ');
+
+    const actions = document.createElement('div');
+    actions.className = 'history-actions';
+
+    if (entry.status === 'success') {
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'danger';
+      deleteBtn.dataset.action = 'delete-file';
+      deleteBtn.dataset.id = entry.id;
+      deleteBtn.textContent = 'Delete from disk';
+      actions.appendChild(deleteBtn);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.dataset.action = 'remove-entry';
+      removeBtn.dataset.id = entry.id;
+      removeBtn.textContent = 'Remove';
+      actions.appendChild(removeBtn);
+    } else {
+      const retryBtn = document.createElement('button');
+      retryBtn.type = 'button';
+      retryBtn.dataset.action = 'retry-entry';
+      retryBtn.dataset.id = entry.id;
+      retryBtn.textContent = 'Retry';
+      actions.appendChild(retryBtn);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.dataset.action = 'remove-entry';
+      removeBtn.dataset.id = entry.id;
+      removeBtn.textContent = 'Remove';
+      actions.appendChild(removeBtn);
+    }
+
+    item.append(top, main, sub, actions);
+    return item;
+  }
+
+  function renderHistory() {
+    const historyList = document.getElementById('dtd-history-list');
+    const emptyEl = document.getElementById('dtd-history-empty');
+    if (!historyList || !emptyEl) return;
+
+    historyList.innerHTML = '';
+    if (state.historyEntries.length === 0) {
+      emptyEl.hidden = false;
+      return;
+    }
+
+    emptyEl.hidden = true;
+    for (const entry of state.historyEntries) {
+      historyList.appendChild(createHistoryItemElement(entry));
+    }
+  }
+
+  function readDownloadFormValues() {
+    const urlInput = document.getElementById('dtd-url');
+    const rootInput = document.getElementById('dtd-root');
+    const folderInput = document.getElementById('dtd-folder');
+    const subdirInput = document.getElementById('dtd-subdir');
+    const filenameInput = document.getElementById('dtd-filename');
+    const overwriteInput = document.getElementById('dtd-overwrite');
+
+    const url = (urlInput?.value || '').trim();
+    const selectedRootValue = (rootInput?.value || '').trim();
+    const folder = (folderInput?.value || '').trim();
+    const subdirectory = (subdirInput?.value || '').trim();
+    const selectedRecentFolder = selectedRootValue.startsWith('recent:')
+      ? selectedRootValue.slice('recent:'.length)
+      : '';
+
+    const effectiveFolder = folder || selectedRecentFolder;
+    const effectiveRootKey = selectedRootValue.startsWith('recent:')
+      ? ''
+      : selectedRootValue;
+
+    return {
+      url,
+      selected_root_value: selectedRootValue,
+      root_key: effectiveRootKey,
+      folder: effectiveFolder,
+      subdirectory,
+      filename: (filenameInput?.value || '').trim(),
+      overwrite: Boolean(overwriteInput?.checked),
+    };
+  }
+
+  function prefillFromHistory(entry) {
+    if (!entry) return;
+
+    const urlInput = document.getElementById('dtd-url');
+    const rootInput = document.getElementById('dtd-root');
+    const folderInput = document.getElementById('dtd-folder');
+    const subdirInput = document.getElementById('dtd-subdir');
+    const filenameInput = document.getElementById('dtd-filename');
+    const overwriteInput = document.getElementById('dtd-overwrite');
+    const advanced = document.getElementById('dtd-advanced');
+
+    if (urlInput) urlInput.value = entry.url || '';
+    if (folderInput) folderInput.value = entry.folder || '';
+    if (subdirInput) subdirInput.value = entry.subdirectory || '';
+    if (filenameInput) filenameInput.value = entry.filename || '';
+    if (overwriteInput) overwriteInput.checked = Boolean(entry.overwrite);
+
+    if (rootInput) {
+      const candidateValues = [entry.selected_root_value, entry.root_key].filter(
+        (value) => Boolean(value),
+      );
+      for (const candidate of candidateValues) {
+        const hasOption = Array.from(rootInput.options).some(
+          (opt) => opt.value === candidate,
+        );
+        if (hasOption) {
+          rootInput.value = candidate;
+          break;
+        }
+      }
+    }
+
+    if (advanced && !advanced.open) {
+      advanced.open = true;
+      writeSessionBoolean(ADVANCED_OPEN_KEY, true);
+    }
+
+    setStatus(
+      'Prefilled failed download. Update destination if needed, then click Download.',
+    );
+  }
+
+  async function deleteFileFromHistory(entry) {
+    if (!entry?.destination_path) {
+      setStatus('This history entry does not have a saved file path.', 'error');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete this file from disk?\n\n${entry.destination_path}`,
+    );
+    if (!confirmed) return;
+
+    setStatus('Deleting file...');
+    const resp = await apiFetch('/download-to-dir/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: entry.destination_path }),
+    });
+    const data = await resp.json().catch(() => ({}));
+
+    if (!resp.ok) {
+      throw new Error(
+        formatApiError(resp.status, data, `Delete failed (${resp.status})`),
+      );
+    }
+
+    removeHistoryEntry(entry.id);
+    if (Boolean(data.deleted)) {
+      setStatus(`Deleted ${entry.destination_path}`, 'success');
+    } else {
+      setStatus('File was already missing. Removed entry from history.', 'success');
+    }
   }
 
   async function pollDownloadProgress(jobId, token) {
@@ -610,26 +974,10 @@
   }
 
   async function handleDownload() {
-    const urlInput = document.getElementById('dtd-url');
-    const rootInput = document.getElementById('dtd-root');
-    const folderInput = document.getElementById('dtd-folder');
-    const subdirInput = document.getElementById('dtd-subdir');
-    const filenameInput = document.getElementById('dtd-filename');
-    const overwriteInput = document.getElementById('dtd-overwrite');
-    const allowAnyFolderInput = document.getElementById('dtd-allow-any-folder');
-
-    const url = (urlInput?.value || '').trim();
-    const rootKey = (rootInput?.value || '').trim();
-    const folder = (folderInput?.value || '').trim();
-    const subdirectory = (subdirInput?.value || '').trim();
     const submitButton = document.getElementById('dtd-submit');
-    const selectedRecentFolder = rootKey.startsWith('recent:')
-      ? rootKey.slice('recent:'.length)
-      : '';
-    const effectiveFolder = folder || selectedRecentFolder;
-    const effectiveRootKey = rootKey.startsWith('recent:') ? '' : rootKey;
+    const attempt = readDownloadFormValues();
 
-    if (!url || (!effectiveRootKey && !effectiveFolder)) {
+    if (!attempt.url || (!attempt.root_key && !attempt.folder)) {
       setStatus('URL and destination are required.', 'error');
       return;
     }
@@ -640,13 +988,12 @@
     setStatus('Starting download...');
 
     const payload = {
-      url,
-      root_key: effectiveRootKey,
-      folder: effectiveFolder,
-      subdirectory,
-      filename: (filenameInput?.value || '').trim(),
-      overwrite: Boolean(overwriteInput?.checked),
-      allow_comfy_root_write: Boolean(allowAnyFolderInput?.checked),
+      url: attempt.url,
+      root_key: attempt.root_key,
+      folder: attempt.folder,
+      subdirectory: attempt.subdirectory,
+      filename: attempt.filename,
+      overwrite: attempt.overwrite,
     };
 
     try {
@@ -658,32 +1005,49 @@
       const startData = await startResp.json().catch(() => ({}));
 
       if (!startResp.ok) {
-        setStatus(
-          formatApiError(
-            startResp.status,
-            startData,
-            `Download failed (${startResp.status})`,
-          ),
-          'error',
+        const message = formatApiError(
+          startResp.status,
+          startData,
+          `Download failed (${startResp.status})`,
         );
+        setStatus(message, 'error');
+        addHistoryEntry({
+          ...attempt,
+          status: 'failed',
+          error: message,
+        });
         return;
       }
 
       const jobId = String(startData.job_id || '').trim();
       if (!jobId) {
-        setStatus('Download did not return a tracking job id.', 'error');
+        const message = 'Download did not return a tracking job id.';
+        setStatus(message, 'error');
+        addHistoryEntry({
+          ...attempt,
+          status: 'failed',
+          error: message,
+        });
         return;
       }
 
       const done = await pollDownloadProgress(jobId, progressToken);
       const mb = Number(done.bytes_written || 0) / (1024 * 1024);
       const recentFolder =
-        normalizeFolderValue(effectiveFolder) ||
-        normalizeFolderValue(
-          `${effectiveRootKey}${subdirectory ? `/${subdirectory}` : ''}`,
+        normalizeFolderValue(attempt.folder)
+        || normalizeFolderValue(
+          `${attempt.root_key}${attempt.subdirectory ? `/${attempt.subdirectory}` : ''}`,
         );
       saveRecentFolder(recentFolder);
       renderRootOptions();
+
+      addHistoryEntry({
+        ...attempt,
+        status: 'success',
+        destination_path: String(done.destination_path || ''),
+        bytes_written: Number(done.bytes_written || 0),
+      });
+
       const refreshResult = await triggerNodeDefinitionsRefresh();
       const refreshSuffix = refreshResult
         ? ' Node definitions refreshed.'
@@ -693,7 +1057,13 @@
         'success',
       );
     } catch (err) {
-      setStatus(err.message || String(err), 'error');
+      const message = err?.message || String(err);
+      setStatus(message, 'error');
+      addHistoryEntry({
+        ...attempt,
+        status: 'failed',
+        error: message,
+      });
     } finally {
       if (submitButton) submitButton.disabled = false;
     }
@@ -755,6 +1125,7 @@
 
   function renderUi() {
     ensureStyles();
+    writeHistoryEntries(readHistoryEntries());
 
     if (!state.toggleEl) {
       const toggle = document.createElement('button');
@@ -788,35 +1159,39 @@
 
           <div class="field">
             <label>Folder (optional, from ComfyUI root)</label>
-            <input id="dtd-folder" type="text" placeholder="models/checkpoints or custom_nodes/my_extension" />
+            <input id="dtd-folder" type="text" placeholder="models/checkpoints or any/relative/path" />
           </div>
 
           <div class="field">
-            <label>Subdirectory (optional)</label>
-            <input id="dtd-subdir" type="text" placeholder="my/models" />
-          </div>
-
-          <div class="field">
-            <label>Filename (optional)</label>
-            <input id="dtd-filename" type="text" placeholder="auto from URL if empty" />
-          </div>
-
-          <div class="field">
-            <label class="inline">
-              <input id="dtd-overwrite" type="checkbox" />
-              Overwrite existing file
-            </label>
-          </div>
-
-          <div class="field">
-            <details class="advanced">
+            <details id="dtd-advanced" class="section advanced">
               <summary>Advanced</summary>
               <div class="advanced-body">
-                <div class="advanced-note">Allow writing to any folder under ComfyUI root (not only models/ and custom_nodes/).</div>
-                <label class="inline">
-                  <input id="dtd-allow-any-folder" type="checkbox" />
-                  Allow any ComfyUI-root folder
-                </label>
+                <div class="field">
+                  <label>Subdirectory (optional)</label>
+                  <input id="dtd-subdir" type="text" placeholder="my/models" />
+                </div>
+
+                <div class="field">
+                  <label>Filename (optional)</label>
+                  <input id="dtd-filename" type="text" placeholder="auto from URL if empty" />
+                </div>
+
+                <div class="field">
+                  <label class="inline">
+                    <input id="dtd-overwrite" type="checkbox" />
+                    Overwrite existing file
+                  </label>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <div class="field">
+            <details id="dtd-history" class="section history" open>
+              <summary>History (Session)</summary>
+              <div class="history-body">
+                <p id="dtd-history-empty" class="history-empty">No downloads in this session yet.</p>
+                <div id="dtd-history-list" class="history-list"></div>
               </div>
             </details>
           </div>
@@ -853,6 +1228,16 @@
 
     ensureButtonMounted();
 
+    const advanced = document.getElementById('dtd-advanced');
+    if (advanced instanceof HTMLDetailsElement) {
+      advanced.open = readSessionBoolean(ADVANCED_OPEN_KEY, false);
+      advanced.addEventListener('toggle', () => {
+        writeSessionBoolean(ADVANCED_OPEN_KEY, advanced.open);
+      });
+    }
+
+    renderHistory();
+
     const rootSelect = document.getElementById('dtd-root');
     const folderInput = document.getElementById('dtd-folder');
     if (rootSelect && folderInput) {
@@ -860,6 +1245,37 @@
         const selected = rootSelect.value || '';
         if (selected.startsWith('recent:')) {
           folderInput.value = selected.slice('recent:'.length);
+        }
+      });
+    }
+
+    const historyList = document.getElementById('dtd-history-list');
+    if (historyList) {
+      historyList.addEventListener('click', (event) => {
+        const button = event.target instanceof Element
+          ? event.target.closest('button[data-action][data-id]')
+          : null;
+        if (!button) return;
+
+        const action = button.getAttribute('data-action') || '';
+        const entryId = button.getAttribute('data-id') || '';
+        const entry = getHistoryEntry(entryId);
+        if (!entry) return;
+
+        if (action === 'remove-entry') {
+          removeHistoryEntry(entryId);
+          return;
+        }
+
+        if (action === 'retry-entry') {
+          prefillFromHistory(entry);
+          return;
+        }
+
+        if (action === 'delete-file') {
+          deleteFileFromHistory(entry).catch((err) => {
+            setStatus(err.message || String(err), 'error');
+          });
         }
       });
     }
@@ -878,7 +1294,6 @@
       close.addEventListener('click', () => closeDialogAnimated(dialog));
     }
 
-    // Close when clicking the dialog backdrop (outside modal content).
     dialog.addEventListener('click', (event) => {
       if (event.target === dialog) {
         closeDialogAnimated(dialog);

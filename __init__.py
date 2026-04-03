@@ -1,8 +1,6 @@
-import ipaddress
 import logging
 import os
 import ssl
-import socket
 import tempfile
 import threading
 import time
@@ -25,17 +23,6 @@ NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
 DOWNLOAD_JOBS: dict[str, dict] = {}
 DOWNLOAD_JOBS_LOCK = threading.Lock()
-
-
-def _env_flag(name: str, default: bool = False) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
-ALLOW_COMFY_ROOT_WRITE = _env_flag("DOWNLOAD_TO_DIR_ALLOW_COMFY_ROOT_WRITE", default=False)
-
 
 def _iter_subdirectories(base_path: str) -> list[str]:
     if not os.path.isdir(base_path):
@@ -146,28 +133,6 @@ def _normalize_download_url(download_url: str) -> str:
     return download_url
 
 
-def _host_is_private(hostname: str) -> bool:
-    try:
-        addr_infos = socket.getaddrinfo(hostname, None)
-    except socket.gaierror:
-        return True
-
-    for info in addr_infos:
-        ip_str = info[4][0]
-        ip = ipaddress.ip_address(ip_str)
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_reserved
-            or ip.is_multicast
-            or ip.is_unspecified
-        ):
-            return True
-
-    return False
-
-
 def _open_url_with_ssl_fallback(req: urllib.request.Request, timeout: int = 45):
     try:
         return urllib.request.urlopen(req, timeout=timeout)
@@ -258,8 +223,6 @@ def _prepare_download_request(body: dict) -> dict:
     subdirectory = str(body.get("subdirectory", "")).strip()
     filename = str(body.get("filename", "")).strip()
     overwrite = bool(body.get("overwrite", False))
-    allow_private_hosts = bool(body.get("allow_private_hosts", False))
-    allow_comfy_root_write = bool(body.get("allow_comfy_root_write", False))
 
     if not download_url:
         raise web.HTTPBadRequest(reason="Missing required field: url")
@@ -274,10 +237,7 @@ def _prepare_download_request(body: dict) -> dict:
         raise web.HTTPBadRequest(reason="Invalid root_key")
 
     download_url = _normalize_download_url(download_url)
-    parsed_url = _validate_remote_url(download_url)
-
-    if not allow_private_hosts and parsed_url.hostname and _host_is_private(parsed_url.hostname):
-        raise web.HTTPBadRequest(reason="Downloading from private or localhost addresses is blocked")
+    _validate_remote_url(download_url)
 
     root_path = roots[root_key]
 
@@ -295,23 +255,6 @@ def _prepare_download_request(body: dict) -> dict:
 
     destination_path = _safe_path_from_root(target_dir, safe_filename)
 
-    # Public-safe default:
-    # If user types a custom folder (which routes through Comfy root),
-    # only permit models/* and custom_nodes/* unless explicit override is enabled.
-    if root_key == "comfy_root" and not (allow_comfy_root_write or ALLOW_COMFY_ROOT_WRITE):
-        allowed_roots = [
-            roots.get("models", ""),
-            *(path for key, path in roots.items() if key == "custom_nodes" or key.startswith("custom_nodes_")),
-        ]
-        allowed_roots = [path for path in allowed_roots if path]
-        if not _is_within_any_root(destination_path, allowed_roots):
-            raise web.HTTPBadRequest(
-                reason=(
-                    "Folder must be inside models/ or custom_nodes/. "
-                    "Set DOWNLOAD_TO_DIR_ALLOW_COMFY_ROOT_WRITE=1 to allow broader ComfyUI root writes."
-                )
-            )
-
     if os.path.exists(destination_path) and not overwrite:
         raise web.HTTPConflict(reason="Destination file already exists; set overwrite=true to replace it")
 
@@ -320,6 +263,20 @@ def _prepare_download_request(body: dict) -> dict:
         "root_key": root_key,
         "destination_path": destination_path,
     }
+
+
+def _resolve_deletable_path(path_value: str, roots: dict[str, str]) -> str:
+    candidate = str(path_value or "").strip()
+    if not candidate:
+        raise web.HTTPBadRequest(reason="Missing required field: path")
+
+    delete_path = os.path.abspath(candidate)
+    allowed_roots = [path for path in roots.values() if path]
+    if not _is_within_any_root(delete_path, allowed_roots):
+        raise web.HTTPBadRequest(reason="Requested path is outside allowed ComfyUI roots")
+    if os.path.isdir(delete_path):
+        raise web.HTTPBadRequest(reason="Path points to a directory; only files can be deleted")
+    return delete_path
 
 
 def _prune_old_jobs() -> None:
@@ -474,3 +431,22 @@ async def get_download_progress(request: web.Request) -> web.Response:
         payload["progress_percent"] = None
 
     return web.json_response(payload)
+
+
+@PromptServer.instance.routes.post("/download-to-dir/delete")
+async def delete_downloaded_file(request: web.Request) -> web.Response:
+    body = await request.json()
+    roots = _build_root_map()
+    delete_path = _resolve_deletable_path(body.get("path", ""), roots)
+
+    deleted = False
+    try:
+        if os.path.exists(delete_path):
+            os.remove(delete_path)
+            deleted = True
+    except FileNotFoundError:
+        deleted = False
+    except OSError as exc:
+        raise web.HTTPInternalServerError(reason=f"Failed to delete file: {exc}")
+
+    return web.json_response({"ok": True, "deleted": deleted, "path": delete_path})

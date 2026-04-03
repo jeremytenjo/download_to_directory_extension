@@ -1,7 +1,9 @@
 import importlib
+import json
 from pathlib import Path
 import sys
 import types
+import asyncio
 
 from aiohttp import web
 import pytest
@@ -28,9 +30,9 @@ def test_safe_path_from_root_blocks_escape(tmp_path: Path):
         dtd._safe_path_from_root(str(tmp_path), "../outside.txt")
 
 
-def test_prepare_download_request_folder_restricted_to_models_and_custom_nodes(
+def test_prepare_download_request_allows_comfy_root_subfolders_and_localhost(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+) -> None:
     comfy_root = tmp_path
     models_dir = comfy_root / "models"
     custom_nodes_dir = comfy_root / "custom_nodes"
@@ -49,23 +51,83 @@ def test_prepare_download_request_folder_restricted_to_models_and_custom_nodes(
         Path(path).mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(dtd, "_build_root_map", lambda: roots)
-    monkeypatch.setattr(dtd, "_host_is_private", lambda _hostname: False)
-
-    with pytest.raises(web.HTTPBadRequest):
-        dtd._prepare_download_request(
-            {
-                "url": "https://example.com/file.safetensors",
-                "folder": "app/config",
-                "overwrite": True,
-            }
-        )
 
     prepared = dtd._prepare_download_request(
         {
-            "url": "https://example.com/model.safetensors",
-            "folder": "models/checkpoints",
+            "url": "http://127.0.0.1:8188/model.safetensors",
+            "folder": "app/config",
             "overwrite": True,
         }
     )
     assert prepared["root_key"] == "comfy_root"
-    assert prepared["destination_path"].startswith(str(models_dir))
+    assert prepared["destination_path"].startswith(str(comfy_root / "app" / "config"))
+
+
+class _FakeRequest:
+    def __init__(self, body: dict):
+        self._body = body
+
+    async def json(self) -> dict:
+        return self._body
+
+
+def test_delete_downloaded_file_deletes_and_is_idempotent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    comfy_root = tmp_path / "comfy"
+    user_dir = comfy_root / "user"
+    user_dir.mkdir(parents=True, exist_ok=True)
+    target_file = user_dir / "model.safetensors"
+    target_file.write_text("content", encoding="utf-8")
+
+    roots = {
+        "input": str(comfy_root / "input"),
+        "output": str(comfy_root / "output"),
+        "user": str(user_dir),
+        "comfy_root": str(comfy_root),
+    }
+    for path in roots.values():
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(dtd, "_build_root_map", lambda: roots)
+
+    response = asyncio.run(
+        dtd.delete_downloaded_file(_FakeRequest({"path": str(target_file)}))
+    )
+    payload = json.loads(response.text)
+    assert payload["ok"] is True
+    assert payload["deleted"] is True
+    assert target_file.exists() is False
+
+    response_again = asyncio.run(
+        dtd.delete_downloaded_file(_FakeRequest({"path": str(target_file)}))
+    )
+    payload_again = json.loads(response_again.text)
+    assert payload_again["ok"] is True
+    assert payload_again["deleted"] is False
+
+
+def test_delete_downloaded_file_rejects_path_outside_roots(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    comfy_root = tmp_path / "comfy"
+    user_dir = comfy_root / "user"
+    user_dir.mkdir(parents=True, exist_ok=True)
+
+    roots = {
+        "input": str(comfy_root / "input"),
+        "output": str(comfy_root / "output"),
+        "user": str(user_dir),
+        "comfy_root": str(comfy_root),
+    }
+    for path in roots.values():
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(dtd, "_build_root_map", lambda: roots)
+
+    with pytest.raises(web.HTTPBadRequest):
+        asyncio.run(
+            dtd.delete_downloaded_file(
+                _FakeRequest({"path": str(tmp_path / "outside.bin")})
+            )
+        )

@@ -9,20 +9,13 @@ Download files from HTTP/HTTPS URLs directly into selected ComfyUI folders, with
 - GitHub `blob` URL normalization to raw content URLs.
 - Recent folders history (`optgroup` in destination selector).
 - Optional typed folder input relative to ComfyUI root.
+- Session history accordion for successful/failed downloads with retry/remove actions.
+- File deletion from history for successful downloads.
+- Advanced accordion state persisted per browser session.
 
 ## Safety defaults
 - Only `http` / `https` URLs are allowed.
-- Private / localhost targets are blocked by default.
 - Path traversal is blocked (`..` and escaping root).
-- Typed ComfyUI-root folder writes are restricted to:
-  - `models/...`
-  - `custom_nodes/...`
-
-To allow broader writes under ComfyUI root, set:
-
-```bash
-export DOWNLOAD_TO_DIR_ALLOW_COMFY_ROOT_WRITE=1
-```
 
 ## Install
 Clone into `ComfyUI/custom_nodes/`:
@@ -44,3 +37,11 @@ Restart ComfyUI.
 - TLS certificate failures use a `certifi` fallback when available.
 - On successful download, the extension attempts to refresh node definitions using the same command path as pressing `R`.
 
+## Manual Verification Checklist
+- Advanced accordion open/closed state persists after modal close/reopen and page refresh in the same browser session.
+- Advanced accordion state resets after ending the browser session.
+- Successful download adds a history item with `Delete from disk` and `Remove`.
+- `Delete from disk` shows a confirmation prompt and removes the file from disk when confirmed.
+- Failed download adds a history item with `Retry` and `Remove`.
+- `Retry` pre-fills form fields without auto-starting a new download.
+- History persists across refresh in the same session and clears after session end.

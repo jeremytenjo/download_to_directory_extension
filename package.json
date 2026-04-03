@@ -1,0 +1,5 @@
+{
+  "scripts": {
+    "dev": "cd ../.. && python3 main.py --enable-manager"
+  }
+}
