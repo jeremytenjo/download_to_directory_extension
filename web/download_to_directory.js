@@ -288,6 +288,8 @@
       }
       #${DIALOG_ID} .history-body {
         padding: 0 12px 10px;
+        max-height: min(42vh, 360px);
+        overflow: auto;
       }
       #${DIALOG_ID} .history-empty {
         margin: 0;
