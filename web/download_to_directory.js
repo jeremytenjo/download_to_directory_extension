@@ -745,13 +745,6 @@
       deleteBtn.dataset.id = entry.id;
       deleteBtn.textContent = 'Delete from disk';
       actions.appendChild(deleteBtn);
-
-      const removeBtn = document.createElement('button');
-      removeBtn.type = 'button';
-      removeBtn.dataset.action = 'remove-entry';
-      removeBtn.dataset.id = entry.id;
-      removeBtn.textContent = 'Ignore';
-      actions.appendChild(removeBtn);
     } else {
       const retryBtn = document.createElement('button');
       retryBtn.type = 'button';
@@ -764,7 +757,7 @@
       removeBtn.type = 'button';
       removeBtn.dataset.action = 'remove-entry';
       removeBtn.dataset.id = entry.id;
-      removeBtn.textContent = 'Remove';
+      removeBtn.textContent = 'Ignore';
       actions.appendChild(removeBtn);
     }
 
