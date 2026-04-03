@@ -815,9 +815,6 @@
           </div>
         </div>
         <div class="field">
-          <div class="hint">Only HTTP/HTTPS. Private/localhost targets are blocked by default. If Folder is set, it is relative to your ComfyUI root and overrides Destination root + Subdirectory. For safety, typed folders are limited to models/ or custom_nodes/ by default.</div>
-        </div>
-        <div class="field">
           <div class="status"></div>
         </div>
       </div>
