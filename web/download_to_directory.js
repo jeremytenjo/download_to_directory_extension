@@ -186,6 +186,35 @@
         gap: 12px;
         margin: 6px 0 8px;
       }
+      #${DIALOG_ID} details.advanced {
+        margin: 2px 0 14px;
+        border: 1px solid var(--p-content-border-color, #434958);
+        border-radius: 12px;
+        background: var(--p-surface-900, #1a1f27);
+        overflow: hidden;
+      }
+      #${DIALOG_ID} details.advanced > summary {
+        cursor: pointer;
+        list-style: none;
+        padding: 11px 14px;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--p-text-color, #f5f7fb);
+        user-select: none;
+      }
+      #${DIALOG_ID} details.advanced > summary::-webkit-details-marker {
+        display: none;
+      }
+      #${DIALOG_ID} .advanced-body {
+        padding: 0 14px 12px;
+      }
+      #${DIALOG_ID} .advanced-note {
+        margin-top: -2px;
+        margin-bottom: 8px;
+        color: var(--p-text-muted-color, #a8afbd);
+        font-size: 13px;
+        line-height: 1.3;
+      }
       #${DIALOG_ID} .inline input[type="checkbox"] {
         margin: 0;
         width: 24px;
@@ -537,6 +566,7 @@
     const subdirInput = document.getElementById('dtd-subdir');
     const filenameInput = document.getElementById('dtd-filename');
     const overwriteInput = document.getElementById('dtd-overwrite');
+    const allowAnyFolderInput = document.getElementById('dtd-allow-any-folder');
 
     const url = (urlInput?.value || '').trim();
     const rootKey = (rootInput?.value || '').trim();
@@ -566,6 +596,7 @@
       subdirectory,
       filename: (filenameInput?.value || '').trim(),
       overwrite: Boolean(overwriteInput?.checked),
+      allow_comfy_root_write: Boolean(allowAnyFolderInput?.checked),
     };
 
     try {
@@ -697,6 +728,17 @@
 
         <label>Folder (optional, from ComfyUI root)</label>
         <input id="dtd-folder" type="text" placeholder="models/checkpoints or custom_nodes/my_extension" />
+
+        <details class="advanced">
+          <summary>Advanced</summary>
+          <div class="advanced-body">
+            <div class="advanced-note">Allow writing to any folder under ComfyUI root (not only models/ and custom_nodes/).</div>
+            <label class="inline">
+              <input id="dtd-allow-any-folder" type="checkbox" />
+              Allow any ComfyUI-root folder
+            </label>
+          </div>
+        </details>
 
         <label>Subdirectory (optional)</label>
         <input id="dtd-subdir" type="text" placeholder="my/models" />
