@@ -25,6 +25,15 @@ def test_normalize_download_url_github_blob():
     assert normalized == "https://raw.githubusercontent.com/org/repo/main/path/file.yaml"
 
 
+def test_normalize_download_url_huggingface_blob():
+    url = "https://huggingface.co/org/repo/blob/main/path/model.safetensors"
+    normalized = dtd._normalize_download_url(url)
+    assert (
+        normalized
+        == "https://huggingface.co/org/repo/resolve/main/path/model.safetensors?download=true"
+    )
+
+
 def test_safe_path_from_root_blocks_escape(tmp_path: Path):
     with pytest.raises(web.HTTPBadRequest):
         dtd._safe_path_from_root(str(tmp_path), "../outside.txt")
@@ -57,10 +66,12 @@ def test_prepare_download_request_allows_comfy_root_subfolders_and_localhost(
             "url": "http://127.0.0.1:8188/model.safetensors",
             "folder": "app/config",
             "overwrite": True,
+            "huggingface_token": "hf_test_token",
         }
     )
     assert prepared["root_key"] == "comfy_root"
     assert prepared["destination_path"].startswith(str(comfy_root / "app" / "config"))
+    assert prepared["huggingface_token"] == "hf_test_token"
 
 
 class _FakeRequest:

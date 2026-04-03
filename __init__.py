@@ -155,6 +155,20 @@ def _normalize_download_url(download_url: str) -> str:
                 ("https", "raw.githubusercontent.com", f"/{raw_path}", "", "", "")
             )
 
+    # Convert Hugging Face blob links to direct resolve links.
+    # Example:
+    # https://huggingface.co/org/repo/blob/main/model.safetensors
+    # -> https://huggingface.co/org/repo/resolve/main/model.safetensors?download=true
+    if host in {"huggingface.co", "www.huggingface.co"}:
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) >= 5 and parts[2] == "blob":
+            owner, repo, _, ref, *rest = parts
+            resolve_path = "/".join([owner, repo, "resolve", ref, *rest])
+            query = "download=true"
+            return urllib.parse.urlunparse(
+                ("https", "huggingface.co", f"/{resolve_path}", "", query, "")
+            )
+
     return download_url
 
 
@@ -183,13 +197,24 @@ def _open_url_with_ssl_fallback(req: urllib.request.Request, timeout: int = 45):
 def _download_file(
     download_url: str,
     destination_path: str,
+    huggingface_token: str = "",
     progress_callback: Callable[[int, int | None], None] | None = None,
 ) -> tuple[int, int | None]:
+    parsed_url = urllib.parse.urlparse(download_url)
+    host = (parsed_url.hostname or "").lower()
+    headers = {
+        "User-Agent": "ComfyUI-DirectoryDownloader/1.0",
+    }
+    # Allow authenticated downloads for gated HF models when users provide a token.
+    if (
+        huggingface_token
+        and host in {"huggingface.co", "www.huggingface.co", "hf.co"}
+    ):
+        headers["Authorization"] = f"Bearer {huggingface_token}"
+
     req = urllib.request.Request(
         download_url,
-        headers={
-            "User-Agent": "ComfyUI-DirectoryDownloader/1.0",
-        },
+        headers=headers,
     )
 
     bytes_written = 0
@@ -232,6 +257,17 @@ def _download_file(
 
         os.replace(tmp_file_path, destination_path)
         return bytes_written, total_bytes
+    except urllib.error.HTTPError as exc:
+        if exc.code in {401, 403}:
+            raise web.HTTPBadRequest(
+                reason=(
+                    f"Download blocked by remote host (HTTP {exc.code}). "
+                    "Authentication or access approval may be required."
+                )
+            ) from exc
+        raise web.HTTPBadRequest(
+            reason=f"Download failed with HTTP {exc.code} ({exc.reason})"
+        ) from exc
     except Exception:
         if tmp_file_path and os.path.exists(tmp_file_path):
             try:
@@ -248,6 +284,9 @@ def _prepare_download_request(body: dict) -> dict:
     subdirectory = str(body.get("subdirectory", "")).strip()
     filename = str(body.get("filename", "")).strip()
     overwrite = bool(body.get("overwrite", False))
+    huggingface_token = str(
+        body.get("huggingface_token", body.get("hf_token", ""))
+    ).strip()
 
     if not download_url:
         raise web.HTTPBadRequest(reason="Missing required field: url")
@@ -287,6 +326,7 @@ def _prepare_download_request(body: dict) -> dict:
         "download_url": download_url,
         "root_key": root_key,
         "destination_path": destination_path,
+        "huggingface_token": huggingface_token,
     }
 
 
@@ -316,7 +356,13 @@ def _prune_old_jobs() -> None:
             DOWNLOAD_JOBS.pop(job_id, None)
 
 
-def _run_download_job(job_id: str, download_url: str, destination_path: str, root_key: str) -> None:
+def _run_download_job(
+    job_id: str,
+    download_url: str,
+    destination_path: str,
+    root_key: str,
+    huggingface_token: str,
+) -> None:
     def on_progress(bytes_written: int, total_bytes: int | None) -> None:
         with DOWNLOAD_JOBS_LOCK:
             job = DOWNLOAD_JOBS.get(job_id)
@@ -331,6 +377,7 @@ def _run_download_job(job_id: str, download_url: str, destination_path: str, roo
         bytes_written, total_bytes = _download_file(
             download_url,
             destination_path,
+            huggingface_token=huggingface_token,
             progress_callback=on_progress,
         )
         with DOWNLOAD_JOBS_LOCK:
@@ -405,6 +452,7 @@ async def start_download_to_directory(request: web.Request) -> web.Response:
             prepared["download_url"],
             prepared["destination_path"],
             prepared["root_key"],
+            prepared["huggingface_token"],
         ),
         daemon=True,
     ).start()

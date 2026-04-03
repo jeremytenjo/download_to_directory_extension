@@ -4,6 +4,7 @@
   const RECENT_FOLDERS_KEY = 'download-to-directory-recent-folders-v1';
   const ADVANCED_OPEN_KEY = 'download-to-directory-advanced-open-v1';
   const HISTORY_KEY = 'download-to-directory-history-v1';
+  const HF_TOKEN_KEY = 'download-to-directory-hf-token-v1';
   const MAX_RECENT_FOLDERS = 8;
   const MAX_HISTORY_ITEMS = 100;
   const HOT_RELOAD_POLL_MS = 800;
@@ -203,6 +204,12 @@
         color: var(--p-text-color, #f5f7fb);
         font-size: 14px;
         font-weight: 600;
+      }
+      #${DIALOG_ID} .hint {
+        margin: 0;
+        color: var(--p-text-muted-color, #a8afbd);
+        font-size: 12px;
+        line-height: 1.35;
       }
       #${DIALOG_ID} .status {
         margin: 0;
@@ -577,6 +584,41 @@
     return raw || fallbackMessage || `Request failed (${status})`;
   }
 
+  function isHuggingFaceUrl(url) {
+    try {
+      const parsed = new URL(String(url || '').trim());
+      const host = String(parsed.hostname || '').toLowerCase();
+      return (
+        host === 'huggingface.co' ||
+        host === 'www.huggingface.co' ||
+        host === 'hf.co'
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function formatHuggingFaceAuthMessage(rawMessage) {
+    const base =
+      String(rawMessage || '').trim() || 'Hugging Face download was blocked.';
+    return `${base} Add your Hugging Face token in Advanced > Hugging Face token, then retry. Create/read token at https://huggingface.co/settings/tokens and make sure you accepted access terms on the model page.`;
+  }
+
+  function maybeFormatHuggingFaceAuthError(url, message) {
+    const raw = String(message || '').trim();
+    const normalized = raw.toLowerCase();
+    const isAuthError =
+      normalized.includes('401') ||
+      normalized.includes('403') ||
+      normalized.includes('unauthorized') ||
+      normalized.includes('forbidden') ||
+      normalized.includes('authentication') ||
+      normalized.includes('blocked');
+
+    if (!isAuthError || !isHuggingFaceUrl(url)) return raw;
+    return formatHuggingFaceAuthMessage(raw);
+  }
+
   function normalizeFolderValue(value) {
     return String(value || '')
       .trim()
@@ -869,6 +911,7 @@
     const subdirInput = document.getElementById('dtd-subdir');
     const filenameInput = document.getElementById('dtd-filename');
     const overwriteInput = document.getElementById('dtd-overwrite');
+    const hfTokenInput = document.getElementById('dtd-hf-token');
 
     const url = (urlInput?.value || '').trim();
     const selectedRootValue = (rootInput?.value || '').trim();
@@ -891,6 +934,7 @@
       subdirectory,
       filename: (filenameInput?.value || '').trim(),
       overwrite: Boolean(overwriteInput?.checked),
+      huggingface_token: (hfTokenInput?.value || '').trim(),
     };
   }
 
@@ -1073,6 +1117,7 @@
       subdirectory: attempt.subdirectory,
       filename: attempt.filename,
       overwrite: attempt.overwrite,
+      huggingface_token: attempt.huggingface_token,
     };
 
     try {
@@ -1084,10 +1129,13 @@
       const startData = await startResp.json().catch(() => ({}));
 
       if (!startResp.ok) {
-        const message = formatApiError(
-          startResp.status,
-          startData,
-          `Download failed (${startResp.status})`,
+        const message = maybeFormatHuggingFaceAuthError(
+          attempt.url,
+          formatApiError(
+            startResp.status,
+            startData,
+            `Download failed (${startResp.status})`,
+          ),
         );
         setStatus(message, 'error');
         addHistoryEntry({
@@ -1136,7 +1184,10 @@
         'success',
       );
     } catch (err) {
-      const message = err?.message || String(err);
+      const message = maybeFormatHuggingFaceAuthError(
+        attempt.url,
+        err?.message || String(err),
+      );
       setStatus(message, 'error');
       addHistoryEntry({
         ...attempt,
@@ -1256,6 +1307,12 @@
                 </div>
 
                 <div class="field">
+                  <label>Hugging Face token (optional)</label>
+                  <input id="dtd-hf-token" type="password" placeholder="hf_... (for gated/private Hugging Face downloads)" autocomplete="off" />
+                  <p class="hint">Only needed for gated/private Hugging Face files.</p>
+                </div>
+
+                <div class="field">
                   <label class="inline">
                     <input id="dtd-overwrite" type="checkbox" />
                     Overwrite existing file
@@ -1312,6 +1369,15 @@
       advanced.open = readSessionBoolean(ADVANCED_OPEN_KEY, false);
       advanced.addEventListener('toggle', () => {
         writeSessionBoolean(ADVANCED_OPEN_KEY, advanced.open);
+      });
+    }
+
+    const hfTokenInput = document.getElementById('dtd-hf-token');
+    if (hfTokenInput instanceof HTMLInputElement) {
+      const savedToken = String(readSessionJson(HF_TOKEN_KEY, '') || '');
+      hfTokenInput.value = savedToken;
+      hfTokenInput.addEventListener('input', () => {
+        writeSessionJson(HF_TOKEN_KEY, String(hfTokenInput.value || '').trim());
       });
     }
 
