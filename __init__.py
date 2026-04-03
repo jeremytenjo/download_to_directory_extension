@@ -17,12 +17,37 @@ import folder_paths
 from server import PromptServer
 
 WEB_DIRECTORY = "./web"
+HOT_RELOAD_ENV_VAR = "COMFYUI_DTD_HOT_RELOAD"
 
 # No node classes; this extension only exposes backend + frontend utilities.
 NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
 DOWNLOAD_JOBS: dict[str, dict] = {}
 DOWNLOAD_JOBS_LOCK = threading.Lock()
+
+
+def _is_hot_reload_enabled() -> bool:
+    value = os.environ.get(HOT_RELOAD_ENV_VAR, "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _compute_web_change_stamp() -> float:
+    web_dir = Path(__file__).resolve().parent / "web"
+    if not web_dir.is_dir():
+        return 0.0
+
+    newest_mtime = 0.0
+    for path in web_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        if any(part.startswith(".") for part in path.parts):
+            continue
+        try:
+            newest_mtime = max(newest_mtime, path.stat().st_mtime)
+        except OSError:
+            # Ignore races while files are being edited.
+            continue
+    return newest_mtime
 
 def _iter_subdirectories(base_path: str) -> list[str]:
     if not os.path.isdir(base_path):
@@ -344,6 +369,13 @@ async def list_download_roots(request: web.Request) -> web.Response:
     # Do not expose Comfy root as a direct selectable root in public UI.
     payload = [{"key": key, "path": path} for key, path in roots.items() if key != "comfy_root"]
     return web.json_response({"roots": payload})
+
+
+@PromptServer.instance.routes.get("/download-to-dir/dev/web-change-stamp")
+async def get_web_change_stamp(_request: web.Request) -> web.Response:
+    if not _is_hot_reload_enabled():
+        return web.json_response({"enabled": False, "stamp": 0})
+    return web.json_response({"enabled": True, "stamp": _compute_web_change_stamp()})
 
 
 @PromptServer.instance.routes.post("/download-to-dir/start")

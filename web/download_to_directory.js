@@ -6,6 +6,7 @@
   const HISTORY_KEY = 'download-to-directory-history-v1';
   const MAX_RECENT_FOLDERS = 8;
   const MAX_HISTORY_ITEMS = 100;
+  const HOT_RELOAD_POLL_MS = 800;
 
   const state = {
     apiPrefix: '/api',
@@ -15,6 +16,9 @@
     activeProgressToken: 0,
     historyEntries: [],
   };
+
+  let hotReloadTimer = null;
+  let lastHotReloadStamp = null;
 
   function ensureStyles() {
     if (document.getElementById('download-to-directory-style')) return;
@@ -376,6 +380,49 @@
     `;
 
     document.head.appendChild(style);
+  }
+
+  async function fetchWebChangeStamp() {
+    const response = await fetch(
+      `${state.apiPrefix}/download-to-dir/dev/web-change-stamp`,
+      {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Hot reload probe failed: ${response.status}`);
+    }
+    return response.json();
+  }
+
+  function startHotReloadWatcher() {
+    if (hotReloadTimer !== null) return;
+
+    hotReloadTimer = window.setInterval(async () => {
+      try {
+        const payload = await fetchWebChangeStamp();
+        if (!payload?.enabled) return;
+
+        const stamp =
+          typeof payload.stamp === 'number'
+            ? payload.stamp
+            : Number(payload.stamp);
+        if (!Number.isFinite(stamp) || stamp <= 0) return;
+
+        if (lastHotReloadStamp === null) {
+          lastHotReloadStamp = stamp;
+          return;
+        }
+
+        if (stamp !== lastHotReloadStamp) {
+          lastHotReloadStamp = stamp;
+          window.location.reload();
+        }
+      } catch (_err) {
+        // Ignore probe failures; hot-reload is best-effort in dev only.
+      }
+    }, HOT_RELOAD_POLL_MS);
   }
 
   async function apiFetch(path, options) {
@@ -1364,6 +1411,7 @@
     }
 
     renderUi();
+    startHotReloadWatcher();
   }
 
   if (document.readyState === 'loading') {
