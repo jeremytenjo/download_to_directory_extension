@@ -58,7 +58,7 @@
         font-size: 16px;
       }
       #${DIALOG_ID} {
-        width: min(760px, calc(100vw - 64px));
+        width: min(720px, calc(100vw - 64px));
         max-height: min(88vh, 900px);
         overflow: hidden;
         border: 1px solid var(--p-content-border-color, #343943);
@@ -124,12 +124,14 @@
         }
       }
       #${DIALOG_ID} .body {
-        padding: 24px 24px 20px;
+        --dtd-body-pad-x: 18px;
+        --dtd-band-bg: var(--p-surface-900, #141922);
+        padding: 16px var(--dtd-body-pad-x) 14px;
         max-height: min(88vh, 900px);
         overflow: auto;
       }
       #${DIALOG_ID} .row {
-        --dtd-stack-gap: 16px;
+        --dtd-stack-gap: 12px;
         display: flex;
         flex-direction: column;
         gap: var(--dtd-stack-gap);
@@ -137,7 +139,26 @@
       #${DIALOG_ID} .field {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 6px;
+      }
+      #${DIALOG_ID} .bleed {
+        box-sizing: border-box;
+        margin-left: calc(-1 * var(--dtd-body-pad-x));
+        margin-right: calc(-1 * var(--dtd-body-pad-x));
+        width: calc(100% + (var(--dtd-body-pad-x) * 2));
+      }
+      #${DIALOG_ID} .title-band,
+      #${DIALOG_ID} .cta-band {
+        background: var(--dtd-band-bg);
+        padding: 10px var(--dtd-body-pad-x);
+      }
+      #${DIALOG_ID} .title-band {
+        padding-top: 8px;
+        padding-bottom: 8px;
+      }
+      #${DIALOG_ID} .divider {
+        height: 1px;
+        background: var(--p-content-border-color, #434958);
       }
       #${DIALOG_ID} input,
       #${DIALOG_ID} select,
@@ -145,12 +166,12 @@
         width: 100%;
         box-sizing: border-box;
         margin: 0;
-        border-radius: 12px;
+        border-radius: 11px;
         border: 1px solid var(--p-content-border-color, #434958);
         background: var(--p-surface-800, #232831);
         color: var(--p-text-color, #f5f7fb);
-        padding: 11px 14px;
-        font-size: 15px;
+        padding: 9px 12px;
+        font-size: 14px;
         line-height: 1.4;
       }
       #${DIALOG_ID} input::placeholder {
@@ -165,7 +186,7 @@
       #${DIALOG_ID} label {
         display: block;
         color: var(--p-text-color, #f5f7fb);
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 600;
       }
       #${DIALOG_ID} .status {
@@ -181,14 +202,14 @@
       }
       #${DIALOG_ID} .hint {
         color: var(--p-text-muted-color, #a8afbd);
-        font-size: 14px;
+        font-size: 13px;
         margin: 0;
         line-height: 1.35;
       }
       #${DIALOG_ID} .inline {
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 10px;
         margin: 0;
       }
       #${DIALOG_ID} details.advanced {
@@ -201,8 +222,8 @@
       #${DIALOG_ID} details.advanced > summary {
         cursor: pointer;
         list-style: none;
-        padding: 11px 14px;
-        font-size: 14px;
+        padding: 9px 12px;
+        font-size: 13px;
         font-weight: 600;
         color: var(--p-text-color, #f5f7fb);
         user-select: none;
@@ -211,19 +232,19 @@
         display: none;
       }
       #${DIALOG_ID} .advanced-body {
-        padding: 0 14px 12px;
+        padding: 0 12px 10px;
       }
       #${DIALOG_ID} .advanced-note {
         margin-top: -2px;
         margin-bottom: 8px;
         color: var(--p-text-muted-color, #a8afbd);
-        font-size: 13px;
+        font-size: 12px;
         line-height: 1.3;
       }
       #${DIALOG_ID} .inline input[type="checkbox"] {
         margin: 0;
-        width: 24px;
-        height: 24px;
+        width: 22px;
+        height: 22px;
         border-radius: 6px;
         border: 1px solid var(--p-content-border-color, #505768);
         background: var(--p-surface-900, #1a1f27);
@@ -232,12 +253,12 @@
       }
       #${DIALOG_ID} .actions {
         display: flex;
-        gap: 12px;
+        gap: 10px;
         margin: 0;
       }
       #${DIALOG_ID} .actions button {
         margin-bottom: 0;
-        height: 46px;
+        height: 42px;
         font-weight: 600;
         cursor: pointer;
         transition: filter 120ms ease, border-color 120ms ease, background 120ms ease;
@@ -260,7 +281,7 @@
       }
       #${DIALOG_ID} .title {
         margin: 0;
-        font-size: 30px;
+        font-size: 24px;
         line-height: 1.1;
         font-weight: 650;
       }
@@ -737,7 +758,10 @@
       dialog.id = DIALOG_ID;
       dialog.innerHTML = `
       <div class="body row">
-        <h2 class="title">Downloader</h2>
+        <div class="title-band bleed">
+          <h2 class="title">Downloader</h2>
+        </div>
+        <div class="divider bleed"></div>
         <div class="field">
           <label>File URL</label>
           <input id="dtd-url" type="text" placeholder="https://example.com/file.bin" />
@@ -783,7 +807,8 @@
           </details>
         </div>
 
-        <div class="field">
+        <div class="divider bleed"></div>
+        <div class="cta-band bleed">
           <div class="actions">
             <button id="dtd-submit" type="button">Download</button>
             <button id="dtd-close" type="button">Close</button>
