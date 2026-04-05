@@ -282,6 +282,14 @@
       #${DIALOG_ID} #dtd-submit:hover {
         filter: brightness(1.08);
       }
+      #${DIALOG_ID} #dtd-upload {
+        background: var(--p-surface-800, #232831);
+        border-color: color-mix(in srgb, var(--p-primary-color, #2587f9) 40%, var(--p-content-border-color, #434958));
+        color: var(--p-text-color, #f5f7fb);
+      }
+      #${DIALOG_ID} #dtd-upload:hover {
+        background: var(--p-surface-700, #2c323d);
+      }
       #${DIALOG_ID} #dtd-close {
         background: var(--p-surface-800, #232831);
         border-color: var(--p-content-border-color, #434958);
@@ -559,6 +567,9 @@
     const raw = String(data?.reason || data?.error || '').trim();
     const msg = raw.toLowerCase();
 
+    if (status === 405) {
+      return 'Upload endpoint is not available in the running backend. Restart ComfyUI to load the new upload route.';
+    }
     if (status === 409) {
       return 'A file with that name already exists. Enable "Overwrite existing file" or choose a different filename/subdirectory.';
     }
@@ -702,6 +713,12 @@
       subdirectory: String(entry?.subdirectory || '').trim(),
       filename: String(entry?.filename || '').trim(),
       file_name: String(entry?.file_name || '').trim(),
+      operation: (() => {
+        const candidate = String(entry?.operation || 'download')
+          .trim()
+          .toLowerCase();
+        return candidate === 'upload' ? 'upload' : 'download';
+      })(),
       overwrite: Boolean(entry?.overwrite),
       destination_path: String(entry?.destination_path || '').trim(),
       path: String(entry?.path || '').trim(),
@@ -927,7 +944,7 @@
       deleteBtn.dataset.id = entry.id;
       deleteBtn.textContent = 'Delete from disk';
       actions.appendChild(deleteBtn);
-    } else if (entry.status === 'failed') {
+    } else if (entry.status === 'failed' && entry.operation !== 'upload') {
       const pathInput = document.createElement('input');
       pathInput.type = 'text';
       pathInput.className = 'history-path-input';
@@ -943,6 +960,13 @@
       retryBtn.textContent = 'Retry';
       actions.appendChild(retryBtn);
 
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.dataset.action = 'remove-entry';
+      removeBtn.dataset.id = entry.id;
+      removeBtn.textContent = 'Ignore';
+      actions.appendChild(removeBtn);
+    } else if (entry.status === 'failed') {
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
       removeBtn.dataset.action = 'remove-entry';
@@ -1193,6 +1217,7 @@
         } else {
           addHistoryEntry({
             ...attempt,
+            operation: 'download',
             status: 'failed',
             error: message,
           });
@@ -1212,6 +1237,7 @@
         } else {
           addHistoryEntry({
             ...attempt,
+            operation: 'download',
             status: 'failed',
             error: message,
           });
@@ -1224,6 +1250,7 @@
       if (!historyTargetId) {
         addHistoryEntry({
           ...attempt,
+          operation: 'download',
           id: entryId,
           created_at: Date.now(),
           status: 'queued',
@@ -1296,6 +1323,7 @@
       if (!trackedJobId && !historyTargetId) {
         addHistoryEntry({
           ...attempt,
+          operation: 'download',
           status: 'failed',
           error: message,
         });
@@ -1303,6 +1331,85 @@
     } finally {
       // Per-download state persists in the combined list.
     }
+  }
+
+  async function handleUpload(file) {
+    const selectedFile = file instanceof File ? file : null;
+    if (!selectedFile) {
+      setStatus('Choose a file to upload.', 'error');
+      return;
+    }
+
+    const attempt = readDownloadFormValues();
+    if (!attempt.root_key && !attempt.folder) {
+      setStatus('Destination is required.', 'error');
+      return;
+    }
+
+    const payload = new FormData();
+    payload.append('file', selectedFile);
+    payload.append('root_key', attempt.root_key || '');
+    payload.append('folder', attempt.folder || '');
+    payload.append('subdirectory', attempt.subdirectory || '');
+    payload.append('filename', attempt.filename || '');
+    payload.append('overwrite', attempt.overwrite ? 'true' : 'false');
+
+    setStatus(`Uploading ${selectedFile.name}...`);
+
+    const resp = await apiFetch('/download-to-dir/upload', {
+      method: 'POST',
+      body: payload,
+    });
+    const data = await resp.json().catch(() => ({}));
+
+    if (!resp.ok) {
+      const message = formatApiError(
+        resp.status,
+        data,
+        `Upload failed (${resp.status})`,
+      );
+      addHistoryEntry({
+        ...attempt,
+        operation: 'upload',
+        status: 'failed',
+        file_name: selectedFile.name,
+        error: message,
+      });
+      setStatus(message, 'error');
+      return;
+    }
+
+    const writtenBytes = Number(data.bytes_written || selectedFile.size || 0);
+    const destinationPath = String(data.destination_path || '').trim();
+    addHistoryEntry({
+      ...attempt,
+      operation: 'upload',
+      status: 'success',
+      file_name: selectedFile.name,
+      destination_path: destinationPath,
+      path: destinationPath,
+      bytes_written: writtenBytes,
+      total_bytes: writtenBytes,
+      progress_percent: 100,
+      error: '',
+    });
+
+    const recentFolder =
+      normalizeFolderValue(attempt.folder) ||
+      normalizeFolderValue(
+        `${attempt.root_key}${attempt.subdirectory ? `/${attempt.subdirectory}` : ''}`,
+      );
+    saveRecentFolder(recentFolder);
+    renderRootOptions();
+
+    const refreshResult = await triggerNodeDefinitionsRefresh();
+    const refreshSuffix = refreshResult
+      ? ' Node definitions refreshed.'
+      : ' Upload complete. Press R to refresh node definitions.';
+    setStatus(
+      `Saved to ${destinationPath} (${formatBytes(writtenBytes)}).${refreshSuffix}`,
+      'success',
+    );
   }
 
   function retryHistoryEntry(entry) {
@@ -1496,8 +1603,10 @@
         <div class="cta-band bleed">
           <div class="actions">
             <button id="dtd-submit" type="button">Download</button>
+            <button id="dtd-upload" type="button">Upload</button>
             <button id="dtd-close" type="button">Close</button>
           </div>
+          <input id="dtd-file" type="file" hidden />
         </div>
         <div class="field">
           <div class="status"></div>
@@ -1605,6 +1714,20 @@
     if (submit) {
       submit.addEventListener('click', () => {
         handleDownload().catch((err) =>
+          setStatus(err.message || String(err), 'error'),
+        );
+      });
+    }
+
+    const upload = document.getElementById('dtd-upload');
+    const fileInput = document.getElementById('dtd-file');
+    if (upload && fileInput instanceof HTMLInputElement) {
+      upload.addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', () => {
+        const [file] = Array.from(fileInput.files || []);
+        fileInput.value = '';
+        if (!file) return;
+        handleUpload(file).catch((err) =>
           setStatus(err.message || String(err), 'error'),
         );
       });

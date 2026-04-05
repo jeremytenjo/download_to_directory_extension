@@ -142,3 +142,68 @@ def test_delete_downloaded_file_rejects_path_outside_roots(
                 _FakeRequest({"path": str(tmp_path / "outside.bin")})
             )
         )
+
+
+def test_prepare_upload_request_uses_uploaded_filename(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    comfy_root = tmp_path / "comfy"
+    models_dir = comfy_root / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    roots = {
+        "input": str(comfy_root / "input"),
+        "output": str(comfy_root / "output"),
+        "user": str(comfy_root / "user"),
+        "comfy_root": str(comfy_root),
+        "models": str(models_dir),
+    }
+    for path in roots.values():
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(dtd, "_build_root_map", lambda: roots)
+
+    prepared = dtd._prepare_upload_request(
+        {
+            "root_key": "models",
+            "subdirectory": "loras",
+            "overwrite": "false",
+        },
+        uploaded_filename="my-model.safetensors",
+    )
+    assert prepared["root_key"] == "models"
+    assert prepared["destination_path"].endswith(
+        str(Path("models") / "loras" / "my-model.safetensors")
+    )
+
+
+def test_prepare_upload_request_blocks_overwrite_by_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    comfy_root = tmp_path / "comfy"
+    models_dir = comfy_root / "models"
+    target_dir = models_dir / "loras"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_file = target_dir / "my-model.safetensors"
+    target_file.write_text("existing", encoding="utf-8")
+
+    roots = {
+        "input": str(comfy_root / "input"),
+        "output": str(comfy_root / "output"),
+        "user": str(comfy_root / "user"),
+        "comfy_root": str(comfy_root),
+        "models": str(models_dir),
+    }
+    for path in roots.values():
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(dtd, "_build_root_map", lambda: roots)
+
+    with pytest.raises(web.HTTPConflict):
+        dtd._prepare_upload_request(
+            {
+                "root_key": "models",
+                "subdirectory": "loras",
+            },
+            uploaded_filename="my-model.safetensors",
+        )

@@ -330,6 +330,47 @@ def _prepare_download_request(body: dict) -> dict:
     }
 
 
+def _parse_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _prepare_upload_request(body: dict, uploaded_filename: str) -> dict:
+    root_key = str(body.get("root_key", "")).strip()
+    folder = str(body.get("folder", "")).strip()
+    subdirectory = str(body.get("subdirectory", "")).strip()
+    filename = str(body.get("filename", "")).strip()
+    overwrite = _parse_bool(body.get("overwrite", False))
+
+    roots = _build_root_map()
+    if folder:
+        root_key = "comfy_root"
+        # Treat typed folder as relative to ComfyUI root.
+        subdirectory = folder.replace("\\", "/").lstrip("/")
+
+    if root_key not in roots:
+        raise web.HTTPBadRequest(reason="Invalid root_key")
+
+    root_path = roots[root_key]
+    target_dir = _safe_path_from_root(root_path, subdirectory) if subdirectory else root_path
+    os.makedirs(target_dir, exist_ok=True)
+
+    desired_filename = filename or str(uploaded_filename or "").strip()
+    if not desired_filename:
+        raise web.HTTPBadRequest(reason="Missing uploaded filename")
+
+    safe_filename = _sanitize_filename(desired_filename)
+    destination_path = _safe_path_from_root(target_dir, safe_filename)
+    if os.path.exists(destination_path) and not overwrite:
+        raise web.HTTPConflict(reason="Destination file already exists; set overwrite=true to replace it")
+
+    return {
+        "root_key": root_key,
+        "destination_path": destination_path,
+    }
+
+
 def _resolve_deletable_path(path_value: str, roots: dict[str, str]) -> str:
     candidate = str(path_value or "").strip()
     if not candidate:
@@ -504,3 +545,51 @@ async def delete_downloaded_file(request: web.Request) -> web.Response:
         raise web.HTTPInternalServerError(reason=f"Failed to delete file: {exc}")
 
     return web.json_response({"ok": True, "deleted": deleted, "path": delete_path})
+
+
+@PromptServer.instance.routes.post("/download-to-dir/upload")
+async def upload_file_to_directory(request: web.Request) -> web.Response:
+    form = await request.post()
+    file_field = form.get("file")
+    if not isinstance(file_field, web.FileField):
+        raise web.HTTPBadRequest(reason="Missing upload field: file")
+
+    prepared = _prepare_upload_request(dict(form), file_field.filename)
+    destination_path = prepared["destination_path"]
+    target_dir = os.path.dirname(destination_path)
+    tmp_file_path = ""
+    bytes_written = 0
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            suffix=".part",
+            prefix="upload_",
+            dir=target_dir,
+            delete=False,
+        ) as tmp:
+            tmp_file_path = tmp.name
+            while True:
+                chunk = file_field.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                tmp.write(chunk)
+                bytes_written += len(chunk)
+
+        os.replace(tmp_file_path, destination_path)
+    except Exception:
+        if tmp_file_path and os.path.exists(tmp_file_path):
+            try:
+                os.remove(tmp_file_path)
+            except OSError:
+                logging.warning("Failed to clean temporary upload file: %s", tmp_file_path)
+        raise
+
+    return web.json_response(
+        {
+            "ok": True,
+            "destination_path": destination_path,
+            "root_key": prepared["root_key"],
+            "bytes_written": bytes_written,
+        }
+    )
