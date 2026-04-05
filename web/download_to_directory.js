@@ -381,6 +381,12 @@
         color: var(--p-text-muted-color, #a8afbd);
         overflow-wrap: anywhere;
       }
+      #${DIALOG_ID} .history-error {
+        font-size: 12px;
+        line-height: 1.35;
+        color: #ff8f9d;
+        overflow-wrap: anywhere;
+      }
       #${DIALOG_ID} .history-path-input {
         margin: 0;
         width: 100%;
@@ -945,8 +951,12 @@
     if (locationLabel) parts.push(locationLabel);
     const progressLabel = formatEntryProgress(entry);
     if (progressLabel) parts.push(progressLabel);
-    if (entry.status === 'failed' && entry.error) parts.push(entry.error);
     sub.textContent = parts.join(' • ');
+
+    const error = document.createElement('div');
+    error.className = 'history-error';
+    error.hidden = !(entry.status === 'failed' && entry.error);
+    error.textContent = entry.status === 'failed' ? String(entry.error || '') : '';
 
     const actions = document.createElement('div');
     actions.className = 'history-actions';
@@ -990,7 +1000,7 @@
       actions.appendChild(removeBtn);
     }
 
-    item.append(top, main, sub, actions);
+    item.append(top, main, sub, error, actions);
     return item;
   }
 
@@ -1348,9 +1358,13 @@
     }
   }
 
-  async function handleUpload(file) {
-    const selectedFile = file instanceof File ? file : null;
-    if (!selectedFile) {
+  async function handleUpload(files) {
+    const selectedFiles = Array.isArray(files)
+      ? files.filter((file) => file instanceof File)
+      : files instanceof File
+        ? [files]
+        : [];
+    if (selectedFiles.length === 0) {
       setStatus('Choose a file to upload.', 'error');
       return;
     }
@@ -1361,53 +1375,75 @@
       return;
     }
 
-    const payload = new FormData();
-    payload.append('file', selectedFile);
-    payload.append('root_key', attempt.root_key || '');
-    payload.append('folder', attempt.folder || '');
-    payload.append('subdirectory', attempt.subdirectory || '');
-    payload.append('filename', attempt.filename || '');
-    payload.append('overwrite', attempt.overwrite ? 'true' : 'false');
-
-    setStatus(`Uploading ${selectedFile.name}...`);
-
-    const resp = await apiFetch('/download-to-dir/upload', {
-      method: 'POST',
-      body: payload,
-    });
-    const data = await resp.json().catch(() => ({}));
-
-    if (!resp.ok) {
-      const message = formatApiError(
-        resp.status,
-        data,
-        `Upload failed (${resp.status})`,
+    if (selectedFiles.length > 1 && attempt.filename) {
+      setStatus(
+        'Filename override is only supported for single-file upload. Clear Filename or upload one file.',
+        'error',
       );
-      addHistoryEntry({
-        ...attempt,
-        operation: 'upload',
-        status: 'failed',
-        file_name: selectedFile.name,
-        error: message,
-      });
-      setStatus(message, 'error');
       return;
     }
 
-    const writtenBytes = Number(data.bytes_written || selectedFile.size || 0);
-    const destinationPath = String(data.destination_path || '').trim();
-    addHistoryEntry({
-      ...attempt,
-      operation: 'upload',
-      status: 'success',
-      file_name: selectedFile.name,
-      destination_path: destinationPath,
-      path: destinationPath,
-      bytes_written: writtenBytes,
-      total_bytes: writtenBytes,
-      progress_percent: 100,
-      error: '',
-    });
+    const singleFileMode = selectedFiles.length === 1;
+    let successCount = 0;
+    let failCount = 0;
+    let lastSuccessPath = '';
+    let lastSuccessBytes = 0;
+
+    for (let index = 0; index < selectedFiles.length; index += 1) {
+      const selectedFile = selectedFiles[index];
+      const payload = new FormData();
+      payload.append('file', selectedFile);
+      payload.append('root_key', attempt.root_key || '');
+      payload.append('folder', attempt.folder || '');
+      payload.append('subdirectory', attempt.subdirectory || '');
+      payload.append('filename', singleFileMode ? attempt.filename || '' : '');
+      payload.append('overwrite', attempt.overwrite ? 'true' : 'false');
+
+      setStatus(
+        `Uploading ${index + 1}/${selectedFiles.length}: ${selectedFile.name}...`,
+      );
+
+      const resp = await apiFetch('/download-to-dir/upload', {
+        method: 'POST',
+        body: payload,
+      });
+      const data = await resp.json().catch(() => ({}));
+
+      if (!resp.ok) {
+        const message = formatApiError(
+          resp.status,
+          data,
+          `Upload failed (${resp.status})`,
+        );
+        addHistoryEntry({
+          ...attempt,
+          operation: 'upload',
+          status: 'failed',
+          file_name: selectedFile.name,
+          error: message,
+        });
+        failCount += 1;
+        continue;
+      }
+
+      const writtenBytes = Number(data.bytes_written || selectedFile.size || 0);
+      const destinationPath = String(data.destination_path || '').trim();
+      addHistoryEntry({
+        ...attempt,
+        operation: 'upload',
+        status: 'success',
+        file_name: selectedFile.name,
+        destination_path: destinationPath,
+        path: destinationPath,
+        bytes_written: writtenBytes,
+        total_bytes: writtenBytes,
+        progress_percent: 100,
+        error: '',
+      });
+      successCount += 1;
+      lastSuccessPath = destinationPath;
+      lastSuccessBytes = writtenBytes;
+    }
 
     const recentFolder =
       normalizeFolderValue(attempt.folder) ||
@@ -1417,13 +1453,38 @@
     saveRecentFolder(recentFolder);
     renderRootOptions();
 
-    const refreshResult = await triggerNodeDefinitionsRefresh();
-    const refreshSuffix = refreshResult
-      ? ' Node definitions refreshed.'
-      : ' Upload complete. Press R to refresh node definitions.';
+    let refreshSuffix = '';
+    if (successCount > 0) {
+      const refreshResult = await triggerNodeDefinitionsRefresh();
+      refreshSuffix = refreshResult
+        ? ' Node definitions refreshed.'
+        : ' Upload complete. Press R to refresh node definitions.';
+    }
+
+    if (successCount === 1 && failCount === 0 && singleFileMode) {
+      setStatus(
+        `Saved to ${lastSuccessPath} (${formatBytes(lastSuccessBytes)}).${refreshSuffix}`,
+        'success',
+      );
+      return;
+    }
+
+    if (failCount === 0) {
+      setStatus(
+        `Uploaded ${successCount} files successfully.${refreshSuffix}`,
+        'success',
+      );
+      return;
+    }
+
+    if (successCount === 0) {
+      setStatus(`Upload failed for all ${failCount} files.`, 'error');
+      return;
+    }
+
     setStatus(
-      `Saved to ${destinationPath} (${formatBytes(writtenBytes)}).${refreshSuffix}`,
-      'success',
+      `Uploaded ${successCount}/${selectedFiles.length} files. ${failCount} failed.${refreshSuffix}`,
+      'error',
     );
   }
 
@@ -1621,7 +1682,7 @@
             <button id="dtd-submit" type="button">Download</button>
             <button id="dtd-upload" type="button">Upload</button>
           </div>
-          <input id="dtd-file" type="file" hidden />
+          <input id="dtd-file" type="file" multiple hidden />
         </div>
         <div class="field">
           <div class="status"></div>
@@ -1739,10 +1800,10 @@
     if (upload && fileInput instanceof HTMLInputElement) {
       upload.addEventListener('click', () => fileInput.click());
       fileInput.addEventListener('change', () => {
-        const [file] = Array.from(fileInput.files || []);
+        const files = Array.from(fileInput.files || []);
         fileInput.value = '';
-        if (!file) return;
-        handleUpload(file).catch((err) =>
+        if (files.length === 0) return;
+        handleUpload(files).catch((err) =>
           setStatus(err.message || String(err), 'error'),
         );
       });
