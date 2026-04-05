@@ -169,6 +169,10 @@
       #${DIALOG_ID} .title-band {
         padding-top: 8px;
         padding-bottom: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
       }
       #${DIALOG_ID} .divider {
         height: 1px;
@@ -290,19 +294,30 @@
       #${DIALOG_ID} #dtd-upload:hover {
         background: var(--p-surface-700, #2c323d);
       }
-      #${DIALOG_ID} #dtd-close {
-        background: var(--p-surface-800, #232831);
-        border-color: var(--p-content-border-color, #434958);
-        color: var(--p-text-color, #f5f7fb);
-      }
-      #${DIALOG_ID} #dtd-close:hover {
-        background: var(--p-surface-700, #2c323d);
-      }
       #${DIALOG_ID} .title {
         margin: 0;
         font-size: 24px;
         line-height: 1.1;
         font-weight: 650;
+      }
+      #${DIALOG_ID} #dtd-close-icon {
+        width: 36px;
+        min-width: 36px;
+        height: 36px;
+        padding: 0;
+        border-radius: 10px;
+        border: 1px solid var(--p-content-border-color, #434958);
+        background: var(--p-surface-800, #232831);
+        color: var(--p-text-color, #f5f7fb);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+        line-height: 1;
+        cursor: pointer;
+      }
+      #${DIALOG_ID} #dtd-close-icon:hover {
+        background: var(--p-surface-700, #2c323d);
       }
       #${DIALOG_ID} .history-body {
         padding: 0 12px 10px;
@@ -1540,6 +1555,7 @@
       <div class="body row">
         <div class="title-band bleed">
           <h2 class="title">Downloader</h2>
+          <button id="dtd-close-icon" type="button" aria-label="Close dialog">&times;</button>
         </div>
         <div class="divider bleed"></div>
         <div class="form-section">
@@ -1604,7 +1620,6 @@
           <div class="actions">
             <button id="dtd-submit" type="button">Download</button>
             <button id="dtd-upload" type="button">Upload</button>
-            <button id="dtd-close" type="button">Close</button>
           </div>
           <input id="dtd-file" type="file" hidden />
         </div>
@@ -1733,7 +1748,7 @@
       });
     }
 
-    const close = document.getElementById('dtd-close');
+    const close = document.getElementById('dtd-close-icon');
     if (close) {
       close.addEventListener('click', () => closeDialogAnimated(dialog));
     }
