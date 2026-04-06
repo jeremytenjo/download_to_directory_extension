@@ -45,3 +45,7 @@ Restart ComfyUI.
 - Failed download adds a history item with `Retry` and `Remove`.
 - `Retry` pre-fills form fields without auto-starting a new download.
 - History persists across refresh in the same session and clears after session end.
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md).
