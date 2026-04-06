@@ -1,6 +1,8 @@
 import logging
 import os
 import ssl
+import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -312,6 +314,39 @@ def _prepare_download_request(body: dict) -> dict:
 
     os.makedirs(target_dir, exist_ok=True)
 
+    def _is_git_repo_url(url: str) -> bool:
+        parsed = urllib.parse.urlparse(url)
+        return str(parsed.path or "").lower().endswith(".git")
+
+    def _is_custom_nodes_target(path: str) -> bool:
+        custom_nodes_roots = [
+            os.path.abspath(p)
+            for p in folder_paths.get_folder_paths("custom_nodes")
+        ]
+        return any(_is_within_root(path, custom_root) for custom_root in custom_nodes_roots)
+
+    if _is_git_repo_url(download_url) and _is_custom_nodes_target(target_dir):
+        parsed = urllib.parse.urlparse(download_url)
+        repo_name = Path(parsed.path).name
+        if repo_name.lower().endswith(".git"):
+            repo_name = repo_name[:-4]
+        repo_name = _sanitize_filename(filename or repo_name)
+        destination_path = _safe_path_from_root(target_dir, repo_name)
+        if os.path.exists(destination_path) and not overwrite:
+            raise web.HTTPConflict(
+                reason=(
+                    "Destination folder already exists; set overwrite=true to replace it"
+                )
+            )
+        return {
+            "mode": "git_clone",
+            "download_url": download_url,
+            "root_key": root_key,
+            "destination_path": destination_path,
+            "huggingface_token": "",
+            "overwrite": overwrite,
+        }
+
     if filename:
         safe_filename = _sanitize_filename(filename)
     else:
@@ -323,10 +358,12 @@ def _prepare_download_request(body: dict) -> dict:
         raise web.HTTPConflict(reason="Destination file already exists; set overwrite=true to replace it")
 
     return {
+        "mode": "download",
         "download_url": download_url,
         "root_key": root_key,
         "destination_path": destination_path,
         "huggingface_token": huggingface_token,
+        "overwrite": overwrite,
     }
 
 
@@ -399,10 +436,12 @@ def _prune_old_jobs() -> None:
 
 def _run_download_job(
     job_id: str,
+    mode: str,
     download_url: str,
     destination_path: str,
     root_key: str,
     huggingface_token: str,
+    overwrite: bool,
 ) -> None:
     def on_progress(bytes_written: int, total_bytes: int | None) -> None:
         with DOWNLOAD_JOBS_LOCK:
@@ -415,12 +454,46 @@ def _run_download_job(
             job["updated_at"] = time.time()
 
     try:
-        bytes_written, total_bytes = _download_file(
-            download_url,
-            destination_path,
-            huggingface_token=huggingface_token,
-            progress_callback=on_progress,
-        )
+        if mode == "git_clone":
+            clone_target = destination_path
+            if os.path.exists(clone_target):
+                if not overwrite:
+                    raise web.HTTPConflict(
+                        reason=(
+                            "Destination folder already exists; set overwrite=true to replace it"
+                        )
+                    )
+                if os.path.isdir(clone_target):
+                    shutil.rmtree(clone_target)
+                else:
+                    os.remove(clone_target)
+
+            try:
+                result = subprocess.run(
+                    ["git", "clone", "--depth", "1", download_url, clone_target],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+            except FileNotFoundError as exc:
+                raise web.HTTPBadRequest(
+                    reason="`git` is not available in this Python environment"
+                ) from exc
+
+            if result.returncode != 0:
+                stderr = (result.stderr or "").strip()
+                stdout = (result.stdout or "").strip()
+                detail = stderr or stdout or "git clone failed"
+                raise web.HTTPBadRequest(reason=f"Git clone failed: {detail}")
+
+            bytes_written, total_bytes = 0, None
+        else:
+            bytes_written, total_bytes = _download_file(
+                download_url,
+                destination_path,
+                huggingface_token=huggingface_token,
+                progress_callback=on_progress,
+            )
         with DOWNLOAD_JOBS_LOCK:
             job = DOWNLOAD_JOBS.get(job_id)
             if not job:
@@ -490,10 +563,12 @@ async def start_download_to_directory(request: web.Request) -> web.Response:
         target=_run_download_job,
         args=(
             job_id,
+            prepared["mode"],
             prepared["download_url"],
             prepared["destination_path"],
             prepared["root_key"],
             prepared["huggingface_token"],
+            bool(prepared.get("overwrite", False)),
         ),
         daemon=True,
     ).start()

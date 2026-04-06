@@ -72,6 +72,80 @@ def test_prepare_download_request_allows_comfy_root_subfolders_and_localhost(
     assert prepared["root_key"] == "comfy_root"
     assert prepared["destination_path"].startswith(str(comfy_root / "app" / "config"))
     assert prepared["huggingface_token"] == "hf_test_token"
+    assert prepared["mode"] == "download"
+
+
+def test_prepare_download_request_uses_git_clone_for_custom_nodes_git_urls(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    comfy_root = tmp_path / "comfy"
+    custom_nodes_dir = comfy_root / "custom_nodes"
+    custom_nodes_dir.mkdir(parents=True, exist_ok=True)
+
+    roots = {
+        "input": str(comfy_root / "input"),
+        "output": str(comfy_root / "output"),
+        "user": str(comfy_root / "user"),
+        "comfy_root": str(comfy_root),
+        "custom_nodes": str(custom_nodes_dir),
+    }
+    for path in roots.values():
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(dtd, "_build_root_map", lambda: roots)
+    monkeypatch.setattr(
+        dtd.folder_paths,
+        "get_folder_paths",
+        lambda key: [str(custom_nodes_dir)] if key == "custom_nodes" else [],
+    )
+
+    prepared = dtd._prepare_download_request(
+        {
+            "url": "https://github.com/org/example-node.git",
+            "root_key": "custom_nodes",
+            "overwrite": False,
+        }
+    )
+    assert prepared["mode"] == "git_clone"
+    assert prepared["destination_path"] == str(custom_nodes_dir / "example-node")
+
+
+def test_prepare_download_request_git_url_non_custom_nodes_stays_download(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    comfy_root = tmp_path / "comfy"
+    models_dir = comfy_root / "models"
+    custom_nodes_dir = comfy_root / "custom_nodes"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    custom_nodes_dir.mkdir(parents=True, exist_ok=True)
+
+    roots = {
+        "input": str(comfy_root / "input"),
+        "output": str(comfy_root / "output"),
+        "user": str(comfy_root / "user"),
+        "comfy_root": str(comfy_root),
+        "models": str(models_dir),
+        "custom_nodes": str(custom_nodes_dir),
+    }
+    for path in roots.values():
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(dtd, "_build_root_map", lambda: roots)
+    monkeypatch.setattr(
+        dtd.folder_paths,
+        "get_folder_paths",
+        lambda key: [str(custom_nodes_dir)] if key == "custom_nodes" else [],
+    )
+
+    prepared = dtd._prepare_download_request(
+        {
+            "url": "https://github.com/org/example-node.git",
+            "root_key": "models",
+            "overwrite": True,
+        }
+    )
+    assert prepared["mode"] == "download"
+    assert prepared["destination_path"].endswith("example-node.git")
 
 
 class _FakeRequest:
