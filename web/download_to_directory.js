@@ -1684,6 +1684,9 @@
         if (finished) return;
         finished = true;
         setStatus(message, 'success');
+        window.setTimeout(() => {
+          setStatus('Ready.');
+        }, 4000);
       };
 
       if (apiObj?.addEventListener) {
