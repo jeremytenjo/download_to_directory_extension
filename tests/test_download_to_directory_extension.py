@@ -281,3 +281,54 @@ def test_prepare_upload_request_blocks_overwrite_by_default(
             },
             uploaded_filename="my-model.safetensors",
         )
+
+
+def test_install_clone_requirements_if_present_skips_when_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = []
+
+    def _fake_run(*_args, **_kwargs):
+        calls.append(1)
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(dtd.os.path, "isfile", lambda _path: False)
+    monkeypatch.setattr(dtd.subprocess, "run", _fake_run)
+
+    dtd._install_clone_requirements_if_present(str(tmp_path))
+    assert calls == []
+
+
+def test_install_clone_requirements_if_present_runs_pip(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured = {}
+
+    def _fake_run(cmd, **_kwargs):
+        captured["cmd"] = cmd
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(dtd.os.path, "isfile", lambda _path: True)
+    monkeypatch.setattr(dtd.subprocess, "run", _fake_run)
+
+    dtd._install_clone_requirements_if_present(str(tmp_path))
+    assert captured["cmd"][0] == dtd.sys.executable
+    assert captured["cmd"][1:4] == ["-m", "pip", "install"]
+    assert captured["cmd"][4] == "-r"
+
+
+def test_install_clone_requirements_if_present_raises_on_pip_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def _fake_run(*_args, **_kwargs):
+        return types.SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="no matching distribution found",
+        )
+
+    monkeypatch.setattr(dtd.os.path, "isfile", lambda _path: True)
+    monkeypatch.setattr(dtd.subprocess, "run", _fake_run)
+
+    with pytest.raises(web.HTTPBadRequest):
+        dtd._install_clone_requirements_if_present(str(tmp_path))

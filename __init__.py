@@ -3,6 +3,7 @@ import os
 import ssl
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -434,6 +435,30 @@ def _prune_old_jobs() -> None:
             DOWNLOAD_JOBS.pop(job_id, None)
 
 
+def _install_clone_requirements_if_present(clone_target: str) -> None:
+    requirements_path = os.path.join(clone_target, "requirements.txt")
+    if not os.path.isfile(requirements_path):
+        return
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-r", requirements_path],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise web.HTTPBadRequest(
+            reason="Python runtime is unavailable for dependency installation"
+        ) from exc
+
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        detail = stderr or stdout or "pip install failed"
+        raise web.HTTPBadRequest(reason=f"Dependency install failed: {detail}")
+
+
 def _run_download_job(
     job_id: str,
     mode: str,
@@ -486,6 +511,7 @@ def _run_download_job(
                 detail = stderr or stdout or "git clone failed"
                 raise web.HTTPBadRequest(reason=f"Git clone failed: {detail}")
 
+            _install_clone_requirements_if_present(clone_target)
             bytes_written, total_bytes = 0, None
         else:
             bytes_written, total_bytes = _download_file(
