@@ -1622,6 +1622,7 @@
         <div class="form-section">
           <div class="field">
             <label>File URL</label>
+            <p class="hint">Tip: .git URLs are cloned automatically when destination is custom_nodes.</p>
             <input id="dtd-url" type="text" placeholder="https://example.com/file.bin" />
           </div>
 
