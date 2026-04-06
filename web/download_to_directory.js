@@ -1579,7 +1579,12 @@
   }
 
   async function callRestartEndpoint() {
-    const routes = ['/manager/reboot', '/api/manager/reboot'];
+    const routes = [
+      '/download-to-dir/restart',
+      '/api/download-to-dir/restart',
+      '/manager/reboot',
+      '/api/manager/reboot',
+    ];
     let lastError = null;
     let lastResponse = null;
 
@@ -1651,7 +1656,7 @@
       const response = await callRestartEndpoint();
       if (!response || response.status === 404) {
         setStatus(
-          'Restart endpoint is unavailable. Install/enable ComfyUI-Manager to use restart.',
+          'Restart endpoint is unavailable.',
           'error',
         );
         return;

@@ -435,6 +435,26 @@ def _prune_old_jobs() -> None:
             DOWNLOAD_JOBS.pop(job_id, None)
 
 
+def _build_restart_command() -> list[str]:
+    sys_argv = sys.argv.copy()
+    if "--windows-standalone-build" in sys_argv:
+        sys_argv.remove("--windows-standalone-build")
+
+    if not sys_argv:
+        return [sys.executable]
+
+    if sys_argv[0].endswith("__main__.py"):
+        module_name = os.path.basename(os.path.dirname(sys_argv[0]))
+        return [sys.executable, "-m", module_name, *sys_argv[1:]]
+
+    return [sys.executable, *sys_argv]
+
+
+def _restart_comfyui_process() -> None:
+    cmd = _build_restart_command()
+    os.execv(sys.executable, cmd)
+
+
 def _install_clone_requirements_if_present(clone_target: str) -> None:
     requirements_path = os.path.join(clone_target, "requirements.txt")
     if not os.path.isfile(requirements_path):
@@ -724,3 +744,16 @@ async def upload_file_to_directory(request: web.Request) -> web.Response:
             "bytes_written": bytes_written,
         }
     )
+
+
+@PromptServer.instance.routes.get("/download-to-dir/restart")
+async def restart_comfyui_from_extension(_request: web.Request) -> web.Response:
+    def _restart_later():
+        time.sleep(0.2)
+        try:
+            _restart_comfyui_process()
+        except Exception:
+            logging.exception("download-to-dir restart failed")
+
+    threading.Thread(target=_restart_later, daemon=True).start()
+    return web.json_response({"ok": True, "message": "Restart requested"})

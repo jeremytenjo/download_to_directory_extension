@@ -354,3 +354,31 @@ def test_install_clone_requirements_if_present_retries_with_python3_when_pip_mis
 
     dtd._install_clone_requirements_if_present(str(tmp_path))
     assert calls == [dtd.sys.executable, "python3"]
+
+
+def test_build_restart_command_module_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        dtd.sys,
+        "argv",
+        ["/tmp/ComfyUI/__main__.py", "--listen", "0.0.0.0"],
+    )
+    monkeypatch.setattr(dtd.sys, "executable", "/usr/bin/python3")
+
+    cmd = dtd._build_restart_command()
+    assert cmd == ["/usr/bin/python3", "-m", "ComfyUI", "--listen", "0.0.0.0"]
+
+
+def test_build_restart_command_script_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        dtd.sys,
+        "argv",
+        ["main.py", "--port", "8188", "--windows-standalone-build"],
+    )
+    monkeypatch.setattr(dtd.sys, "executable", "/usr/bin/python3")
+
+    cmd = dtd._build_restart_command()
+    assert cmd == ["/usr/bin/python3", "main.py", "--port", "8188"]
