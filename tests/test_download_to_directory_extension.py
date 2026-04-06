@@ -332,3 +332,25 @@ def test_install_clone_requirements_if_present_raises_on_pip_failure(
 
     with pytest.raises(web.HTTPBadRequest):
         dtd._install_clone_requirements_if_present(str(tmp_path))
+
+
+def test_install_clone_requirements_if_present_retries_with_python3_when_pip_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = []
+
+    def _fake_run(cmd, **_kwargs):
+        calls.append(cmd[0])
+        if cmd[0] == dtd.sys.executable:
+            return types.SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr="No module named pip",
+            )
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(dtd.os.path, "isfile", lambda _path: True)
+    monkeypatch.setattr(dtd.subprocess, "run", _fake_run)
+
+    dtd._install_clone_requirements_if_present(str(tmp_path))
+    assert calls == [dtd.sys.executable, "python3"]

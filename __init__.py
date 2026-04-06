@@ -440,23 +440,53 @@ def _install_clone_requirements_if_present(clone_target: str) -> None:
     if not os.path.isfile(requirements_path):
         return
 
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-r", requirements_path],
+    def _run_pip_install(python_cmd: str):
+        return subprocess.run(
+            [python_cmd, "-m", "pip", "install", "-r", requirements_path],
             check=False,
             capture_output=True,
             text=True,
         )
-    except FileNotFoundError as exc:
-        raise web.HTTPBadRequest(
-            reason="Python runtime is unavailable for dependency installation"
-        ) from exc
 
-    if result.returncode != 0:
-        stderr = (result.stderr or "").strip()
-        stdout = (result.stdout or "").strip()
+    def _pip_missing(result) -> bool:
+        combined = f"{result.stderr or ''}\n{result.stdout or ''}".lower()
+        return "no module named pip" in combined
+
+    try:
+        result = _run_pip_install(sys.executable)
+    except FileNotFoundError as exc:
+        # Fallback to python3 if the active runtime command is unavailable.
+        try:
+            result = _run_pip_install("python3")
+        except FileNotFoundError as fallback_exc:
+            raise web.HTTPBadRequest(
+                reason="Python runtime is unavailable for dependency installation"
+            ) from fallback_exc
+
+    if result.returncode == 0:
+        return
+
+    # If pip is missing in the current interpreter, retry with python3.
+    if _pip_missing(result):
+        try:
+            fallback_result = _run_pip_install("python3")
+        except FileNotFoundError as fallback_exc:
+            raise web.HTTPBadRequest(
+                reason="Dependency install failed: pip is unavailable in current python and python3 is missing"
+            ) from fallback_exc
+
+        if fallback_result.returncode == 0:
+            return
+
+        stderr = (fallback_result.stderr or "").strip()
+        stdout = (fallback_result.stdout or "").strip()
         detail = stderr or stdout or "pip install failed"
         raise web.HTTPBadRequest(reason=f"Dependency install failed: {detail}")
+
+    stderr = (result.stderr or "").strip()
+    stdout = (result.stdout or "").strip()
+    detail = stderr or stdout or "pip install failed"
+    raise web.HTTPBadRequest(reason=f"Dependency install failed: {detail}")
 
 
 def _run_download_job(

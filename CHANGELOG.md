@@ -6,3 +6,4 @@ All notable changes to this extension are documented in this file.
 
 - Added an `Upload` button to the downloader modal.
 - Added support for cloning `.git` URLs directly into `custom_nodes` instead of downloading.
+- Cloned `.git` repositories now automatically install their `requirements.txt` dependencies by default (when present).
