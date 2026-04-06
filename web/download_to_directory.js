@@ -17,6 +17,7 @@
     historyEntries: [],
   };
 
+  let restartConfirmResolver = null;
   let hotReloadTimer = null;
   let lastHotReloadStamp = null;
 
@@ -287,12 +288,44 @@
         filter: brightness(1.08);
       }
       #${DIALOG_ID} #dtd-upload {
+        width: fit-content;
+        min-width: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding-block: 8px;
+        padding-inline: 18px;
+        line-height: 1;
         background: var(--p-surface-800, #232831);
         border-color: color-mix(in srgb, var(--p-primary-color, #2587f9) 40%, var(--p-content-border-color, #434958));
         color: var(--p-text-color, #f5f7fb);
       }
       #${DIALOG_ID} #dtd-upload:hover {
         background: var(--p-surface-700, #2c323d);
+      }
+      #${DIALOG_ID} #dtd-restart {
+        width: fit-content;
+        min-width: 0;
+        padding: 8px 10px;
+        display: inline-flex;
+        align-items: center;
+        background: var(--p-surface-800, #232831);
+        border-color: color-mix(in srgb, var(--p-primary-color, #2587f9) 40%, var(--p-content-border-color, #434958));
+        color: var(--p-text-color, #f5f7fb);
+      }
+      #${DIALOG_ID} #dtd-restart:hover {
+        background: var(--p-surface-700, #2c323d);
+      }
+      #${DIALOG_ID} #dtd-restart .icon-wrap {
+        width: 22px;
+        height: 22px;
+        border-radius: 7px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #${DIALOG_ID} #dtd-restart .icon-wrap i {
+        font-size: 13px;
       }
       #${DIALOG_ID} .title {
         margin: 0;
@@ -415,6 +448,61 @@
       }
       #${DIALOG_ID} .history-actions .danger {
         border-color: color-mix(in srgb, #ff8f9d 50%, var(--p-content-border-color, #434958));
+      }
+      #${DIALOG_ID} .confirm-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 20000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(8, 10, 14, 0.72);
+      }
+      #${DIALOG_ID} .confirm-modal[hidden] {
+        display: none;
+      }
+      #${DIALOG_ID} .confirm-card {
+        width: min(420px, calc(100vw - 48px));
+        border-radius: 14px;
+        border: 1px solid var(--p-content-border-color, #434958);
+        background: var(--p-surface-900, #141922);
+        box-shadow: 0 18px 42px rgba(0, 0, 0, 0.45);
+        padding: 14px;
+      }
+      #${DIALOG_ID} .confirm-title {
+        margin: 0 0 8px 0;
+        font-size: 17px;
+        line-height: 1.25;
+        font-weight: 700;
+      }
+      #${DIALOG_ID} .confirm-copy {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.4;
+        color: var(--p-text-muted-color, #a8afbd);
+      }
+      #${DIALOG_ID} .confirm-actions {
+        margin-top: 12px;
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      #${DIALOG_ID} .confirm-actions button {
+        width: auto;
+        min-width: 96px;
+        height: 36px;
+        padding: 8px 12px;
+        border-radius: 9px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      #${DIALOG_ID} #dtd-confirm-confirm {
+        background: var(--p-primary-color, #2587f9);
+        border-color: color-mix(in srgb, var(--p-primary-color, #2587f9) 68%, #ffffff 32%);
+        color: #ffffff;
+      }
+      #${DIALOG_ID} #dtd-confirm-confirm:hover {
+        filter: brightness(1.08);
       }
     `;
 
@@ -1106,9 +1194,11 @@
       return;
     }
 
-    const confirmed = window.confirm(
-      `Delete this file from disk?\n\n${deletePath}`,
-    );
+    const confirmed = await requestActionConfirmation({
+      title: 'Delete file from disk?',
+      copy: deletePath,
+      confirmLabel: 'Delete',
+    });
     if (!confirmed) return;
 
     setStatus('Deleting file...');
@@ -1488,6 +1578,105 @@
     );
   }
 
+  async function callRestartEndpoint() {
+    const routes = ['/manager/reboot', '/api/manager/reboot'];
+    let lastError = null;
+    let lastResponse = null;
+
+    for (const route of routes) {
+      try {
+        const resp = await fetch(route, { method: 'GET' });
+        if (resp.status === 404) {
+          lastResponse = resp;
+          continue;
+        }
+        return resp;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (lastError) throw lastError;
+    return lastResponse;
+  }
+
+  function closeConfirmModal(confirmed) {
+    const modal = document.getElementById('dtd-confirm-modal');
+    if (modal) modal.hidden = true;
+    if (restartConfirmResolver) {
+      restartConfirmResolver(Boolean(confirmed));
+      restartConfirmResolver = null;
+    }
+  }
+
+  function requestActionConfirmation({
+    title = 'Are you sure?',
+    copy = '',
+    confirmLabel = 'Confirm',
+  } = {}) {
+    const modal = document.getElementById('dtd-confirm-modal');
+    if (!modal) {
+      return Promise.resolve(window.confirm(`${title}\n\n${copy}`.trim()));
+    }
+
+    const titleEl = document.getElementById('dtd-confirm-title');
+    const copyEl = document.getElementById('dtd-confirm-copy');
+    const confirmEl = document.getElementById('dtd-confirm-confirm');
+    if (titleEl) titleEl.textContent = String(title || '').trim() || 'Are you sure?';
+    if (copyEl) copyEl.textContent = String(copy || '').trim();
+    if (confirmEl) {
+      confirmEl.textContent = String(confirmLabel || '').trim() || 'Confirm';
+    }
+
+    if (restartConfirmResolver) {
+      restartConfirmResolver(false);
+      restartConfirmResolver = null;
+    }
+    modal.hidden = false;
+    return new Promise((resolve) => {
+      restartConfirmResolver = resolve;
+    });
+  }
+
+  async function handleRestart() {
+    const confirmed = await requestActionConfirmation({
+      title: 'Restart ComfyUI?',
+      copy: 'Running tasks may be interrupted. Continue?',
+      confirmLabel: 'Restart',
+    });
+    if (!confirmed) return;
+
+    setStatus('Restarting ComfyUI...');
+    try {
+      const response = await callRestartEndpoint();
+      if (!response || response.status === 404) {
+        setStatus(
+          'Restart endpoint is unavailable. Install/enable ComfyUI-Manager to use restart.',
+          'error',
+        );
+        return;
+      }
+      if (response.status === 403) {
+        setStatus(
+          'Restart was blocked by ComfyUI-Manager security settings.',
+          'error',
+        );
+        return;
+      }
+      if (!response.ok) {
+        setStatus(`Restart failed (${response.status}).`, 'error');
+        return;
+      }
+
+      setStatus(
+        'Restart requested. ComfyUI should reconnect shortly.',
+        'success',
+      );
+    } catch (err) {
+      setStatus(err?.message || String(err), 'error');
+    }
+  }
+
   function retryHistoryEntry(entry) {
     if (!entry) return;
     const retryAttempt = buildRetryAttemptFromEntry(entry);
@@ -1682,11 +1871,24 @@
           <div class="actions">
             <button id="dtd-submit" type="button">Download</button>
             <button id="dtd-upload" type="button">Upload</button>
+            <button id="dtd-restart" type="button">
+              <span class="icon-wrap"><i class="icon-[lucide--refresh-cw]"></i></span>
+            </button>
           </div>
           <input id="dtd-file" type="file" multiple hidden />
         </div>
         <div class="field">
           <div class="status"></div>
+        </div>
+        <div id="dtd-confirm-modal" class="confirm-modal" hidden>
+          <div class="confirm-card">
+            <h3 id="dtd-confirm-title" class="confirm-title">Restart ComfyUI?</h3>
+            <p id="dtd-confirm-copy" class="confirm-copy">Running tasks may be interrupted. Continue?</p>
+            <div class="confirm-actions">
+              <button id="dtd-confirm-cancel" type="button">Cancel</button>
+              <button id="dtd-confirm-confirm" type="button">Restart</button>
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -1810,6 +2012,36 @@
       });
     }
 
+    const restart = document.getElementById('dtd-restart');
+    if (restart) {
+      restart.addEventListener('click', () => {
+        handleRestart().catch((err) =>
+          setStatus(err.message || String(err), 'error'),
+        );
+      });
+    }
+
+    const confirmModal = document.getElementById('dtd-confirm-modal');
+    const confirmCancel = document.getElementById('dtd-confirm-cancel');
+    const confirmConfirm = document.getElementById('dtd-confirm-confirm');
+    if (confirmModal) {
+      confirmModal.addEventListener('click', (event) => {
+        if (event.target === confirmModal) closeConfirmModal(false);
+      });
+      confirmModal.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeConfirmModal(false);
+        }
+      });
+    }
+    if (confirmCancel) {
+      confirmCancel.addEventListener('click', () => closeConfirmModal(false));
+    }
+    if (confirmConfirm) {
+      confirmConfirm.addEventListener('click', () => closeConfirmModal(true));
+    }
+
     const close = document.getElementById('dtd-close-icon');
     if (close) {
       close.addEventListener('click', () => closeDialogAnimated(dialog));
@@ -1817,11 +2049,13 @@
 
     dialog.addEventListener('click', (event) => {
       if (event.target === dialog) {
+        closeConfirmModal(false);
         closeDialogAnimated(dialog);
       }
     });
     dialog.addEventListener('cancel', (event) => {
       event.preventDefault();
+      closeConfirmModal(false);
       closeDialogAnimated(dialog);
     });
 
