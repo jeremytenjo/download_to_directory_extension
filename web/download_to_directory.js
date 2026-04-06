@@ -1674,9 +1674,31 @@
       }
 
       setStatus(
-        'Restart requested. ComfyUI should reconnect shortly.',
+        'Restart requested. Waiting for reconnect...',
         'success',
       );
+
+      const apiObj = window.api;
+      let finished = false;
+      const finish = (message) => {
+        if (finished) return;
+        finished = true;
+        setStatus(message, 'success');
+      };
+
+      if (apiObj?.addEventListener) {
+        const onReconnected = () => {
+          finish('Restart complete. Reconnected to ComfyUI.');
+        };
+        apiObj.addEventListener('reconnected', onReconnected);
+        window.setTimeout(() => {
+          finish('Restart complete. If the UI did not refresh yet, wait a moment or refresh the page.');
+        }, 7000);
+      } else {
+        window.setTimeout(() => {
+          finish('Restart complete. If the UI did not refresh yet, wait a moment or refresh the page.');
+        }, 2500);
+      }
     } catch (err) {
       setStatus(err?.message || String(err), 'error');
     }
