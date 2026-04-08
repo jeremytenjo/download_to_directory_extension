@@ -2366,10 +2366,22 @@
 
       const apiObj = window.api;
       let finished = false;
-      const finish = (message) => {
+      const finish = async (message) => {
         if (finished) return;
         finished = true;
-        setStatus(message, 'success');
+        let suffix = '';
+        try {
+          const refreshed = await triggerNodeDefinitionsRefresh();
+          suffix = refreshed ? ' Node definitions refreshed.' : '';
+        } catch {
+          // Keep restart flow resilient if refresh command path changes.
+        }
+        try {
+          await refreshMissingNodes({ silent: true });
+        } catch {
+          // Best-effort; do not block restart completion UI.
+        }
+        setStatus(`${message}${suffix}`.trim(), 'success');
         window.setTimeout(() => {
           setStatus('Ready.');
         }, 4000);
