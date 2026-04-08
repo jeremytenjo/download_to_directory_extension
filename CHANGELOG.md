@@ -11,6 +11,7 @@ All notable changes to this extension are documented in this file.
 - Added bulk install flow for missing nodes with restart prompt integration.
 - Added live per-node install progress for missing-node installs (current target, completed/total, success/failure counts, and progress bar).
 - Added successful missing-node installs to the Downloads accordion history.
+- Expanded `custom_nodes` git install detection to clone from repository page URLs (GitHub and Hugging Face, including `/tree/<branch>` links), not only `.git` URLs.
 
 ## 2026-04-05
 
