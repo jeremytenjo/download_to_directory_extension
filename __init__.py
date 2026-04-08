@@ -12,6 +12,7 @@ import urllib.error
 import urllib.request
 import uuid
 import json
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -277,8 +278,29 @@ def _download_file(
     download_url: str,
     destination_path: str,
     huggingface_token: str = "",
+    prefer_remote_filename: bool = False,
+    overwrite: bool = False,
     progress_callback: Callable[[int, int | None], None] | None = None,
-) -> tuple[int, int | None]:
+) -> tuple[int, int | None, str]:
+    def _filename_from_content_disposition(value: str) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+
+        match_star = re.search(r"filename\*\s*=\s*([^;]+)", raw, flags=re.IGNORECASE)
+        if match_star:
+            encoded = match_star.group(1).strip().strip('"')
+            if "''" in encoded:
+                encoded = encoded.split("''", 1)[1]
+            decoded = urllib.parse.unquote(encoded).strip()
+            if decoded:
+                return decoded
+
+        match_plain = re.search(r"filename\s*=\s*([^;]+)", raw, flags=re.IGNORECASE)
+        if match_plain:
+            return match_plain.group(1).strip().strip('"').strip()
+        return ""
+
     parsed_url = urllib.parse.urlparse(download_url)
     host = (parsed_url.hostname or "").lower()
     headers = {
@@ -299,6 +321,7 @@ def _download_file(
     bytes_written = 0
     tmp_file_path = ""
     target_dir = os.path.dirname(destination_path)
+    resolved_destination_path = destination_path
 
     try:
         with _open_url_with_ssl_fallback(req, timeout=45) as response:
@@ -313,6 +336,27 @@ def _download_file(
                         total_bytes = parsed_length
                 except ValueError:
                     total_bytes = None
+
+            if prefer_remote_filename:
+                remote_name = _filename_from_content_disposition(
+                    response.headers.get("Content-Disposition", "")
+                )
+                if remote_name:
+                    remote_name = _sanitize_filename(remote_name)
+                    candidate = os.path.abspath(os.path.join(target_dir, remote_name))
+                    if not _is_within_root(candidate, target_dir):
+                        raise web.HTTPBadRequest(reason="Remote filename resolved outside target folder")
+                    if (
+                        candidate != destination_path
+                        and os.path.exists(candidate)
+                        and not overwrite
+                    ):
+                        raise web.HTTPConflict(
+                            reason=(
+                                "Destination file already exists; set overwrite=true to replace it"
+                            )
+                        )
+                    resolved_destination_path = candidate
 
             if progress_callback is not None:
                 progress_callback(0, total_bytes)
@@ -334,8 +378,8 @@ def _download_file(
                     if progress_callback is not None:
                         progress_callback(bytes_written, total_bytes)
 
-        os.replace(tmp_file_path, destination_path)
-        return bytes_written, total_bytes
+        os.replace(tmp_file_path, resolved_destination_path)
+        return bytes_written, total_bytes, resolved_destination_path
     except urllib.error.HTTPError as exc:
         if exc.code in {401, 403}:
             raise web.HTTPBadRequest(
@@ -420,8 +464,10 @@ def _prepare_download_request(body: dict) -> dict:
 
     if filename:
         safe_filename = _sanitize_filename(filename)
+        prefer_remote_filename = False
     else:
         safe_filename = _filename_from_url(download_url)
+        prefer_remote_filename = True
 
     destination_path = _safe_path_from_root(target_dir, safe_filename)
 
@@ -435,6 +481,7 @@ def _prepare_download_request(body: dict) -> dict:
         "destination_path": destination_path,
         "huggingface_token": huggingface_token,
         "overwrite": overwrite,
+        "prefer_remote_filename": prefer_remote_filename,
     }
 
 
@@ -805,6 +852,7 @@ def _run_download_job(
     huggingface_token: str,
     overwrite: bool,
     clone_branch: str = "",
+    prefer_remote_filename: bool = False,
 ) -> None:
     def on_progress(bytes_written: int, total_bytes: int | None) -> None:
         with DOWNLOAD_JOBS_LOCK:
@@ -856,10 +904,12 @@ def _run_download_job(
             _install_clone_requirements_if_present(clone_target)
             bytes_written, total_bytes = 0, None
         else:
-            bytes_written, total_bytes = _download_file(
+            bytes_written, total_bytes, destination_path = _download_file(
                 download_url,
                 destination_path,
                 huggingface_token=huggingface_token,
+                prefer_remote_filename=prefer_remote_filename,
+                overwrite=overwrite,
                 progress_callback=on_progress,
             )
         with DOWNLOAD_JOBS_LOCK:
@@ -938,6 +988,7 @@ async def start_download_to_directory(request: web.Request) -> web.Response:
             prepared["huggingface_token"],
             bool(prepared.get("overwrite", False)),
             str(prepared.get("clone_branch", "") or ""),
+            bool(prepared.get("prefer_remote_filename", False)),
         ),
         daemon=True,
     ).start()

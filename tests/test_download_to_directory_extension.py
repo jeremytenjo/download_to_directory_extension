@@ -363,6 +363,48 @@ def test_prepare_upload_request_blocks_overwrite_by_default(
         )
 
 
+def test_download_file_prefers_remote_content_disposition_filename(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class _FakeResponse:
+        def __init__(self):
+            self.status = 200
+            self.headers = {
+                "Content-Length": "4",
+                "Content-Disposition": 'attachment; filename="breasts-adjustxl.safetensors"',
+            }
+            self._chunks = [b"test", b""]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self, _n: int):
+            return self._chunks.pop(0)
+
+    monkeypatch.setattr(
+        dtd,
+        "_open_url_with_ssl_fallback",
+        lambda req, timeout=45: _FakeResponse(),
+    )
+
+    base_destination = tmp_path / "139625"
+    bytes_written, total_bytes, resolved_destination = dtd._download_file(
+        "https://civitai.com/api/download/models/139625",
+        str(base_destination),
+        prefer_remote_filename=True,
+        overwrite=False,
+    )
+
+    assert bytes_written == 4
+    assert total_bytes == 4
+    assert resolved_destination.endswith("breasts-adjustxl.safetensors")
+    assert (tmp_path / "breasts-adjustxl.safetensors").read_bytes() == b"test"
+    assert not base_destination.exists()
+
+
 def test_install_clone_requirements_if_present_skips_when_missing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

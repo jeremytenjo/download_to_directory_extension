@@ -12,6 +12,7 @@ All notable changes to this extension are documented in this file.
 - Added live per-node install progress for missing-node installs (current target, completed/total, success/failure counts, and progress bar).
 - Added successful missing-node installs to the Downloads accordion history.
 - Expanded `custom_nodes` git install detection to clone from repository page URLs (GitHub and Hugging Face, including `/tree/<branch>` links), not only `.git` URLs.
+- Improved auto-filename handling for direct download links (for example Civitai numeric model URLs) by using server `Content-Disposition` filenames when no filename override is provided.
 
 ## 2026-04-05
 
