@@ -665,11 +665,14 @@
       #${DIALOG_ID} #dtd-missing-restart {
         display: none;
         background: var(--p-surface-800, #232831);
-        border-color: color-mix(in srgb, var(--p-primary-color, #2587f9) 40%, var(--p-content-border-color, #434958));
+        border-color: var(--p-content-border-color, #434958);
         color: var(--p-text-color, #f5f7fb);
       }
       #${DIALOG_ID} #dtd-missing-restart.visible {
         display: inline-flex;
+      }
+      #${DIALOG_ID} #dtd-missing-restart:hover {
+        background: var(--p-surface-700, #2c323d);
       }
       #${DIALOG_ID} #dtd-missing-install:disabled {
         opacity: 0.6;
@@ -962,6 +965,27 @@
         !state.installBusy &&
         String(progressStatus || '').toLowerCase() === 'completed' &&
         progressCompleted > 0;
+      restartButton.classList.toggle('visible', showRestart);
+      restartButton.hidden = !showRestart;
+    }
+  }
+
+  function refreshMissingActionButtons() {
+    const installButton = document.getElementById('dtd-missing-install');
+    const restartButton = document.getElementById('dtd-missing-restart');
+    if (installButton) {
+      const canInstall = buildMissingInstallTargets().length > 0 && !state.installBusy;
+      installButton.disabled = !canInstall;
+      installButton.textContent = state.installBusy
+        ? 'Installing...'
+        : 'Install Missing Nodes';
+    }
+    if (restartButton) {
+      const progress = state.installProgress || null;
+      const showRestart =
+        !state.installBusy &&
+        String(progress?.status || '').toLowerCase() === 'completed' &&
+        Number(progress?.completed_targets || 0) > 0;
       restartButton.classList.toggle('visible', showRestart);
       restartButton.hidden = !showRestart;
     }
@@ -2300,13 +2324,16 @@
     });
   }
 
-  async function handleRestart() {
-    const confirmed = await requestActionConfirmation({
-      title: 'Restart ComfyUI?',
-      copy: 'Running tasks may be interrupted. Continue?',
-      confirmLabel: 'Restart',
-    });
-    if (!confirmed) return;
+  async function handleRestart(options = {}) {
+    const requireConfirm = options?.confirm !== false;
+    if (requireConfirm) {
+      const confirmed = await requestActionConfirmation({
+        title: 'Restart ComfyUI?',
+        copy: 'Running tasks may be interrupted. Continue?',
+        confirmLabel: 'Restart',
+      });
+      if (!confirmed) return;
+    }
 
     setStatus('Restarting ComfyUI...');
     try {
@@ -2776,6 +2803,7 @@
         const key = String(input.dataset.key || '').trim();
         if (!key) return;
         state.manualSourceOverrides[key] = String(input.value || '').trim();
+        refreshMissingActionButtons();
       });
     }
     if (missingClose) {
@@ -2783,7 +2811,7 @@
     }
     if (missingRestart) {
       missingRestart.addEventListener('click', () => {
-        handleRestart().catch((err) =>
+        handleRestart({ confirm: false }).catch((err) =>
           setStatus(err.message || String(err), 'error'),
         );
       });
