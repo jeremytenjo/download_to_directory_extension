@@ -783,6 +783,34 @@
     }
   }
 
+  function collectMissingNodeTypesFromGraph() {
+    try {
+      const graphNodes = Array.isArray(window.app?.graph?._nodes)
+        ? window.app.graph._nodes
+        : [];
+      if (graphNodes.length === 0) return [];
+
+      const registeredTypes = new Set(
+        Object.keys(window.LiteGraph?.registered_node_types || {}),
+      );
+      const virtualNodeTypes = new Set(['Reroute', 'Note']);
+      const missing = new Set();
+
+      for (const node of graphNodes) {
+        const typeName = String(node?.type || '').trim();
+        if (!typeName) continue;
+        if (virtualNodeTypes.has(typeName)) continue;
+        if (!registeredTypes.has(typeName)) {
+          missing.add(typeName);
+        }
+      }
+
+      return Array.from(missing).sort((a, b) => a.localeCompare(b));
+    } catch {
+      return [];
+    }
+  }
+
   function normalizeMissingState(raw) {
     const value = String(raw || '').trim().toLowerCase();
     if (!value) return 'unknown';
@@ -819,18 +847,20 @@
   function updateMissingWarningVisibility() {
     const warningButton = document.getElementById('dtd-missing-warning');
     if (!warningButton) return;
-    const count = state.missingNodes.length;
+    const count =
+      Number(state.missingNodes.length || 0) +
+      Number(state.unknownNodes.length || 0);
     const visible = count > 0;
     warningButton.classList.toggle('visible', visible);
     warningButton.hidden = !visible;
     warningButton.setAttribute(
       'aria-label',
       visible
-        ? `${count} missing custom node${count === 1 ? '' : 's'}`
+        ? `${count} missing workflow node${count === 1 ? '' : 's'}`
         : 'No missing custom nodes',
     );
     warningButton.title = visible
-      ? `${count} missing custom node${count === 1 ? '' : 's'}`
+      ? `${count} missing workflow node${count === 1 ? '' : 's'}`
       : '';
   }
 
@@ -1035,7 +1065,18 @@
         );
       }
       setMissingNodeData(data);
+      if (state.missingNodes.length === 0 && state.unknownNodes.length === 0) {
+        const graphMissing = collectMissingNodeTypesFromGraph();
+        if (graphMissing.length > 0) {
+          setMissingNodeData({ missing: [], unknown_nodes: graphMissing });
+        }
+      }
     } catch (err) {
+      const graphMissing = collectMissingNodeTypesFromGraph();
+      if (graphMissing.length > 0) {
+        setMissingNodeData({ missing: [], unknown_nodes: graphMissing });
+        return;
+      }
       if (!silent) {
         setStatus(err?.message || String(err), 'error');
       }
