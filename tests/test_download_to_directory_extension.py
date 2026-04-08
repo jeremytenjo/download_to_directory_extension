@@ -111,6 +111,85 @@ def test_prepare_download_request_uses_git_clone_for_custom_nodes_git_urls(
     assert prepared["destination_path"] == str(custom_nodes_dir / "example-node")
 
 
+def test_prepare_download_request_uses_git_clone_for_custom_nodes_github_tree_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    comfy_root = tmp_path / "comfy"
+    custom_nodes_dir = comfy_root / "custom_nodes"
+    custom_nodes_dir.mkdir(parents=True, exist_ok=True)
+
+    roots = {
+        "input": str(comfy_root / "input"),
+        "output": str(comfy_root / "output"),
+        "user": str(comfy_root / "user"),
+        "comfy_root": str(comfy_root),
+        "custom_nodes": str(custom_nodes_dir),
+    }
+    for path in roots.values():
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(dtd, "_build_root_map", lambda: roots)
+    monkeypatch.setattr(
+        dtd.folder_paths,
+        "get_folder_paths",
+        lambda key: [str(custom_nodes_dir)] if key == "custom_nodes" else [],
+    )
+
+    prepared = dtd._prepare_download_request(
+        {
+            "url": "https://github.com/org/example-node/tree/main",
+            "root_key": "custom_nodes",
+            "overwrite": False,
+        }
+    )
+    assert prepared["mode"] == "git_clone"
+    assert prepared["download_url"] == "https://github.com/org/example-node.git"
+    assert prepared["clone_branch"] == "main"
+    assert prepared["destination_path"] == str(custom_nodes_dir / "example-node")
+
+
+def test_prepare_download_request_uses_git_clone_for_custom_nodes_hf_space_tree_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    comfy_root = tmp_path / "comfy"
+    custom_nodes_dir = comfy_root / "custom_nodes"
+    custom_nodes_dir.mkdir(parents=True, exist_ok=True)
+
+    roots = {
+        "input": str(comfy_root / "input"),
+        "output": str(comfy_root / "output"),
+        "user": str(comfy_root / "user"),
+        "comfy_root": str(comfy_root),
+        "custom_nodes": str(custom_nodes_dir),
+    }
+    for path in roots.values():
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(dtd, "_build_root_map", lambda: roots)
+    monkeypatch.setattr(
+        dtd.folder_paths,
+        "get_folder_paths",
+        lambda key: [str(custom_nodes_dir)] if key == "custom_nodes" else [],
+    )
+
+    prepared = dtd._prepare_download_request(
+        {
+            "url": "https://huggingface.co/spaces/Huslyo123/comfyui-Huslyo123RealismNode-V2/tree/main",
+            "root_key": "custom_nodes",
+            "overwrite": False,
+        }
+    )
+    assert prepared["mode"] == "git_clone"
+    assert (
+        prepared["download_url"]
+        == "https://huggingface.co/spaces/Huslyo123/comfyui-Huslyo123RealismNode-V2"
+    )
+    assert prepared["clone_branch"] == "main"
+    assert prepared["destination_path"] == str(
+        custom_nodes_dir / "comfyui-Huslyo123RealismNode-V2"
+    )
+
+
 def test_prepare_download_request_git_url_non_custom_nodes_stays_download(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

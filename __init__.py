@@ -178,6 +178,79 @@ def _normalize_download_url(download_url: str) -> str:
     return download_url
 
 
+def _extract_repo_clone_spec(download_url: str) -> dict | None:
+    parsed = urllib.parse.urlparse(download_url)
+    host = (parsed.hostname or "").lower()
+    parts = [part for part in parsed.path.split("/") if part]
+    clean_url = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+
+    if not parts:
+        return None
+
+    raw_repo_name = parts[-1]
+    if raw_repo_name.lower().endswith(".git"):
+        raw_repo_name = raw_repo_name[:-4]
+    if raw_repo_name and host not in {"github.com", "www.github.com", "huggingface.co", "www.huggingface.co"}:
+        return {
+            "clone_url": clean_url,
+            "repo_name": raw_repo_name,
+            "clone_branch": "",
+        }
+
+    if host in {"github.com", "www.github.com"} and len(parts) >= 2:
+        owner, repo = parts[0], parts[1]
+        if repo.lower().endswith(".git"):
+            repo = repo[:-4]
+        if not owner or not repo:
+            return None
+        clone_branch = ""
+        if len(parts) >= 4 and parts[2] == "tree":
+            clone_branch = urllib.parse.unquote("/".join(parts[3:])).strip()
+        return {
+            "clone_url": f"https://github.com/{owner}/{repo}.git",
+            "repo_name": repo,
+            "clone_branch": clone_branch,
+        }
+
+    if host in {"huggingface.co", "www.huggingface.co"}:
+        clone_branch = ""
+
+        if len(parts) >= 3 and parts[0] in {"spaces", "datasets"}:
+            namespace, owner, repo = parts[0], parts[1], parts[2]
+            if len(parts) >= 5 and parts[3] == "tree":
+                clone_branch = urllib.parse.unquote("/".join(parts[4:])).strip()
+            return {
+                "clone_url": f"https://huggingface.co/{namespace}/{owner}/{repo}",
+                "repo_name": repo,
+                "clone_branch": clone_branch,
+            }
+
+        blocked_prefixes = {
+            "docs",
+            "blog",
+            "join",
+            "login",
+            "settings",
+            "organizations",
+            "models",
+            "tasks",
+            "collections",
+            "new",
+            "api",
+        }
+        if len(parts) >= 2 and parts[0] not in blocked_prefixes:
+            owner, repo = parts[0], parts[1]
+            if len(parts) >= 4 and parts[2] == "tree":
+                clone_branch = urllib.parse.unquote("/".join(parts[3:])).strip()
+            return {
+                "clone_url": f"https://huggingface.co/{owner}/{repo}",
+                "repo_name": repo,
+                "clone_branch": clone_branch,
+            }
+
+    return None
+
+
 def _open_url_with_ssl_fallback(req: urllib.request.Request, timeout: int = 45):
     try:
         return urllib.request.urlopen(req, timeout=timeout)
@@ -318,10 +391,6 @@ def _prepare_download_request(body: dict) -> dict:
 
     os.makedirs(target_dir, exist_ok=True)
 
-    def _is_git_repo_url(url: str) -> bool:
-        parsed = urllib.parse.urlparse(url)
-        return str(parsed.path or "").lower().endswith(".git")
-
     def _is_custom_nodes_target(path: str) -> bool:
         custom_nodes_roots = [
             os.path.abspath(p)
@@ -329,12 +398,9 @@ def _prepare_download_request(body: dict) -> dict:
         ]
         return any(_is_within_root(path, custom_root) for custom_root in custom_nodes_roots)
 
-    if _is_git_repo_url(download_url) and _is_custom_nodes_target(target_dir):
-        parsed = urllib.parse.urlparse(download_url)
-        repo_name = Path(parsed.path).name
-        if repo_name.lower().endswith(".git"):
-            repo_name = repo_name[:-4]
-        repo_name = _sanitize_filename(filename or repo_name)
+    repo_clone_spec = _extract_repo_clone_spec(download_url)
+    if repo_clone_spec and _is_custom_nodes_target(target_dir):
+        repo_name = _sanitize_filename(filename or str(repo_clone_spec["repo_name"]))
         destination_path = _safe_path_from_root(target_dir, repo_name)
         if os.path.exists(destination_path) and not overwrite:
             raise web.HTTPConflict(
@@ -344,11 +410,12 @@ def _prepare_download_request(body: dict) -> dict:
             )
         return {
             "mode": "git_clone",
-            "download_url": download_url,
+            "download_url": str(repo_clone_spec["clone_url"]),
             "root_key": root_key,
             "destination_path": destination_path,
             "huggingface_token": "",
             "overwrite": overwrite,
+            "clone_branch": str(repo_clone_spec["clone_branch"] or ""),
         }
 
     if filename:
@@ -737,6 +804,7 @@ def _run_download_job(
     root_key: str,
     huggingface_token: str,
     overwrite: bool,
+    clone_branch: str = "",
 ) -> None:
     def on_progress(bytes_written: int, total_bytes: int | None) -> None:
         with DOWNLOAD_JOBS_LOCK:
@@ -764,8 +832,12 @@ def _run_download_job(
                     os.remove(clone_target)
 
             try:
+                clone_cmd = ["git", "clone", "--depth", "1"]
+                if clone_branch:
+                    clone_cmd.extend(["--branch", clone_branch])
+                clone_cmd.extend([download_url, clone_target])
                 result = subprocess.run(
-                    ["git", "clone", "--depth", "1", download_url, clone_target],
+                    clone_cmd,
                     check=False,
                     capture_output=True,
                     text=True,
@@ -865,6 +937,7 @@ async def start_download_to_directory(request: web.Request) -> web.Response:
             prepared["root_key"],
             prepared["huggingface_token"],
             bool(prepared.get("overwrite", False)),
+            str(prepared.get("clone_branch", "") or ""),
         ),
         daemon=True,
     ).start()
