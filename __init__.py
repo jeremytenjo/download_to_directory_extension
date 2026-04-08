@@ -11,6 +11,7 @@ import urllib.parse
 import urllib.error
 import urllib.request
 import uuid
+import json
 from pathlib import Path
 from typing import Callable
 
@@ -27,6 +28,8 @@ NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
 DOWNLOAD_JOBS: dict[str, dict] = {}
 DOWNLOAD_JOBS_LOCK = threading.Lock()
+MISSING_INSTALL_JOBS: dict[str, dict] = {}
+MISSING_INSTALL_JOBS_LOCK = threading.Lock()
 
 
 def _is_hot_reload_enabled() -> bool:
@@ -435,6 +438,18 @@ def _prune_old_jobs() -> None:
             DOWNLOAD_JOBS.pop(job_id, None)
 
 
+def _prune_old_missing_install_jobs() -> None:
+    now = time.time()
+    with MISSING_INSTALL_JOBS_LOCK:
+        stale_job_ids = [
+            job_id
+            for job_id, job in MISSING_INSTALL_JOBS.items()
+            if job.get("status") in {"completed", "failed", "partial"} and now - float(job.get("updated_at", now)) > 3600
+        ]
+        for job_id in stale_job_ids:
+            MISSING_INSTALL_JOBS.pop(job_id, None)
+
+
 def _build_restart_command() -> list[str]:
     sys_argv = sys.argv.copy()
     if "--windows-standalone-build" in sys_argv:
@@ -507,6 +522,211 @@ def _install_clone_requirements_if_present(clone_target: str) -> None:
     stdout = (result.stdout or "").strip()
     detail = stderr or stdout or "pip install failed"
     raise web.HTTPBadRequest(reason=f"Dependency install failed: {detail}")
+
+
+def _run_comfy_cli_command(args: list[str]) -> subprocess.CompletedProcess[str]:
+    cmd = ["comfy", *args]
+    try:
+        return subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise web.HTTPInternalServerError(
+            reason="`comfy` CLI is not available in this environment"
+        ) from exc
+
+
+def _display_name_from_source_url(source_url: str) -> str:
+    value = str(source_url or "").strip().rstrip("/")
+    if not value:
+        return "unknown"
+    base = os.path.basename(value)
+    if base.lower().endswith(".git"):
+        base = base[:-4]
+    return base or value
+
+
+def _analyze_workflow_missing_nodes(workflow: dict) -> dict:
+    if not isinstance(workflow, dict):
+        raise web.HTTPBadRequest(reason="`workflow` must be a JSON object")
+
+    workflow_tmp = ""
+    deps_tmp = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".json",
+            prefix="dtd_workflow_",
+            encoding="utf-8",
+            delete=False,
+        ) as workflow_file:
+            workflow_tmp = workflow_file.name
+            json.dump(workflow, workflow_file, ensure_ascii=False)
+
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".json",
+            prefix="dtd_deps_",
+            encoding="utf-8",
+            delete=False,
+        ) as deps_file:
+            deps_tmp = deps_file.name
+
+        result = _run_comfy_cli_command(
+            ["node", "deps-in-workflow", "--workflow", workflow_tmp, "--output", deps_tmp]
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or "").strip() or (result.stdout or "").strip() or "deps-in-workflow failed"
+            raise web.HTTPInternalServerError(reason=f"Missing-node analysis failed: {detail}")
+
+        with open(deps_tmp, "r", encoding="utf-8") as handle:
+            deps = json.load(handle)
+    except web.HTTPException:
+        raise
+    except FileNotFoundError as exc:
+        raise web.HTTPInternalServerError(reason=f"Dependency analysis output missing: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise web.HTTPInternalServerError(reason=f"Failed to parse dependency analysis output: {exc}") from exc
+    except Exception as exc:
+        raise web.HTTPInternalServerError(reason=f"Missing-node analysis failed: {exc}") from exc
+    finally:
+        for path in (workflow_tmp, deps_tmp):
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+    custom_nodes = deps.get("custom_nodes", {})
+    unknown_nodes_raw = deps.get("unknown_nodes", [])
+
+    missing = []
+    if isinstance(custom_nodes, dict):
+        for source_url, info in custom_nodes.items():
+            state = str((info or {}).get("state", "unknown")).strip().lower()
+            if state == "installed":
+                continue
+            source = str(source_url or "").strip()
+            display_name = _display_name_from_source_url(source)
+            missing.append(
+                {
+                    "key": source or display_name,
+                    "display_name": display_name,
+                    "source_url": source,
+                    "state": state or "unknown",
+                    "install_target": source or display_name,
+                }
+            )
+
+    unknown_nodes: list[str] = []
+    if isinstance(unknown_nodes_raw, list):
+        unknown_nodes = sorted(
+            {
+                str(node_name).strip()
+                for node_name in unknown_nodes_raw
+                if str(node_name).strip()
+            }
+        )
+
+    missing.sort(key=lambda item: str(item.get("display_name", "")).lower())
+    return {"missing": missing, "unknown_nodes": unknown_nodes}
+
+
+def _run_missing_nodes_install_job(job_id: str, targets: list[str]) -> None:
+    total_targets = len(targets)
+    with MISSING_INSTALL_JOBS_LOCK:
+        job = MISSING_INSTALL_JOBS.get(job_id)
+        if not job:
+            return
+        job["status"] = "running"
+        job["updated_at"] = time.time()
+
+    completed_targets = 0
+    failed_targets = 0
+
+    for index, target in enumerate(targets):
+        with MISSING_INSTALL_JOBS_LOCK:
+            job = MISSING_INSTALL_JOBS.get(job_id)
+            if not job:
+                return
+            job["status"] = "running"
+            job["current_target"] = target
+            job["updated_at"] = time.time()
+
+        result_entry = {
+            "target": target,
+            "ok": False,
+            "stdout": "",
+            "stderr": "",
+            "return_code": -1,
+        }
+
+        try:
+            result = _run_comfy_cli_command(["node", "install", "--exit-on-fail", target])
+            stdout = (result.stdout or "").strip()
+            stderr = (result.stderr or "").strip()
+            is_ok = result.returncode == 0
+            result_entry = {
+                "target": target,
+                "ok": is_ok,
+                "stdout": stdout,
+                "stderr": stderr,
+                "return_code": int(result.returncode),
+            }
+            if is_ok:
+                completed_targets += 1
+            else:
+                failed_targets += 1
+        except web.HTTPException as exc:
+            failed_targets += 1
+            result_entry = {
+                "target": target,
+                "ok": False,
+                "stdout": "",
+                "stderr": str(exc.reason or exc.text or "Install failed"),
+                "return_code": -1,
+            }
+        except Exception as exc:
+            failed_targets += 1
+            result_entry = {
+                "target": target,
+                "ok": False,
+                "stdout": "",
+                "stderr": str(exc),
+                "return_code": -1,
+            }
+
+        with MISSING_INSTALL_JOBS_LOCK:
+            job = MISSING_INSTALL_JOBS.get(job_id)
+            if not job:
+                return
+            results = list(job.get("results", []))
+            results.append(result_entry)
+            job["results"] = results
+            job["completed_targets"] = int(completed_targets)
+            job["failed_targets"] = int(failed_targets)
+            job["progress_percent"] = (
+                ((index + 1) / total_targets) * 100.0 if total_targets > 0 else 0.0
+            )
+            job["updated_at"] = time.time()
+
+    final_status = "completed"
+    if failed_targets > 0 and completed_targets > 0:
+        final_status = "partial"
+    elif failed_targets > 0 and completed_targets == 0:
+        final_status = "failed"
+
+    with MISSING_INSTALL_JOBS_LOCK:
+        job = MISSING_INSTALL_JOBS.get(job_id)
+        if not job:
+            return
+        job["status"] = final_status
+        job["current_target"] = ""
+        job["progress_percent"] = 100.0 if total_targets > 0 else 0.0
+        job["updated_at"] = time.time()
 
 
 def _run_download_job(
@@ -744,6 +964,81 @@ async def upload_file_to_directory(request: web.Request) -> web.Response:
             "bytes_written": bytes_written,
         }
     )
+
+
+@PromptServer.instance.routes.post("/download-to-dir/missing-nodes/analyze")
+async def analyze_missing_nodes(request: web.Request) -> web.Response:
+    body = await request.json()
+    workflow = body.get("workflow")
+    analyzed = _analyze_workflow_missing_nodes(workflow)
+    return web.json_response({"ok": True, **analyzed})
+
+
+@PromptServer.instance.routes.post("/download-to-dir/missing-nodes/install")
+async def install_missing_nodes(request: web.Request) -> web.Response:
+    body = await request.json()
+    raw_targets = body.get("targets", [])
+    if not isinstance(raw_targets, list):
+        raise web.HTTPBadRequest(reason="`targets` must be an array of node specs or git URLs")
+
+    targets: list[str] = []
+    seen = set()
+    for item in raw_targets:
+        value = str(item or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        targets.append(value)
+
+    if not targets:
+        raise web.HTTPBadRequest(reason="No install targets were provided")
+
+    job_id = uuid.uuid4().hex
+    now = time.time()
+    with MISSING_INSTALL_JOBS_LOCK:
+        MISSING_INSTALL_JOBS[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "targets": list(targets),
+            "total_targets": len(targets),
+            "completed_targets": 0,
+            "failed_targets": 0,
+            "current_target": "",
+            "progress_percent": 0.0,
+            "results": [],
+            "updated_at": now,
+            "started_at": now,
+        }
+
+    threading.Thread(
+        target=_run_missing_nodes_install_job,
+        args=(job_id, list(targets)),
+        daemon=True,
+    ).start()
+    _prune_old_missing_install_jobs()
+
+    return web.json_response(
+        {
+            "ok": True,
+            "job_id": job_id,
+            "status": "queued",
+            "total_targets": len(targets),
+        }
+    )
+
+
+@PromptServer.instance.routes.get("/download-to-dir/missing-nodes/install-progress/{job_id}")
+async def get_missing_nodes_install_progress(request: web.Request) -> web.Response:
+    job_id = request.match_info.get("job_id", "").strip()
+    with MISSING_INSTALL_JOBS_LOCK:
+        job = MISSING_INSTALL_JOBS.get(job_id)
+        if not job:
+            raise web.HTTPNotFound(reason="Missing-node install job not found")
+        payload = dict(job)
+        payload["results"] = list(job.get("results", []))
+        payload["targets"] = list(job.get("targets", []))
+
+    return web.json_response(payload)
 
 
 @PromptServer.instance.routes.get("/download-to-dir/restart")

@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import types
 import asyncio
+import time
 
 from aiohttp import web
 import pytest
@@ -382,3 +383,236 @@ def test_build_restart_command_script_mode(
 
     cmd = dtd._build_restart_command()
     assert cmd == ["/usr/bin/python3", "main.py", "--port", "8188"]
+
+
+def test_analyze_missing_nodes_endpoint_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = {
+        "missing": [
+            {
+                "key": "https://github.com/acme/example-node.git",
+                "display_name": "example-node",
+                "source_url": "https://github.com/acme/example-node.git",
+                "state": "not-installed",
+                "install_target": "https://github.com/acme/example-node.git",
+            }
+        ],
+        "unknown_nodes": ["CustomFooNode"],
+    }
+    monkeypatch.setattr(dtd, "_analyze_workflow_missing_nodes", lambda _wf: expected)
+
+    response = asyncio.run(
+        dtd.analyze_missing_nodes(_FakeRequest({"workflow": {"nodes": []}}))
+    )
+    payload = json.loads(response.text)
+    assert payload["ok"] is True
+    assert payload["missing"] == expected["missing"]
+    assert payload["unknown_nodes"] == expected["unknown_nodes"]
+
+
+def test_analyze_missing_nodes_endpoint_rejects_invalid_payload() -> None:
+    with pytest.raises(web.HTTPBadRequest):
+        asyncio.run(dtd.analyze_missing_nodes(_FakeRequest({"workflow": None})))
+
+
+def test_analyze_workflow_missing_nodes_surfaces_cli_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        dtd,
+        "_run_comfy_cli_command",
+        lambda _args: types.SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="simulated deps-in-workflow failure",
+        ),
+    )
+
+    with pytest.raises(web.HTTPInternalServerError) as exc:
+        dtd._analyze_workflow_missing_nodes({"nodes": []})
+    assert "Missing-node analysis failed" in str(exc.value.reason)
+
+
+def test_install_missing_nodes_endpoint_rejects_empty_targets() -> None:
+    with pytest.raises(web.HTTPBadRequest):
+        asyncio.run(dtd.install_missing_nodes(_FakeRequest({"targets": []})))
+
+
+def test_install_missing_nodes_endpoint_starts_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with dtd.MISSING_INSTALL_JOBS_LOCK:
+        dtd.MISSING_INSTALL_JOBS.clear()
+
+    class _NoopThread:
+        def __init__(self, target=None, args=(), daemon=None):
+            self.target = target
+            self.args = args
+            self.daemon = daemon
+
+        def start(self):
+            return None
+
+    monkeypatch.setattr(dtd.threading, "Thread", _NoopThread)
+
+    response = asyncio.run(
+        dtd.install_missing_nodes(
+            _FakeRequest(
+                {
+                    "targets": [
+                        "https://github.com/acme/example-node.git",
+                        "https://github.com/acme/example-node.git",
+                    ]
+                }
+            )
+        )
+    )
+    payload = json.loads(response.text)
+    assert response.status == 200
+    assert payload["ok"] is True
+    assert payload["status"] == "queued"
+    assert payload["total_targets"] == 1
+    assert payload["job_id"]
+    with dtd.MISSING_INSTALL_JOBS_LOCK:
+        assert payload["job_id"] in dtd.MISSING_INSTALL_JOBS
+
+
+def test_get_missing_nodes_install_progress_not_found() -> None:
+    fake_request = types.SimpleNamespace(match_info={"job_id": "does-not-exist"})
+    with pytest.raises(web.HTTPNotFound):
+        asyncio.run(dtd.get_missing_nodes_install_progress(fake_request))
+
+
+def test_get_missing_nodes_install_progress_success() -> None:
+    job_id = "progress_job_test"
+    with dtd.MISSING_INSTALL_JOBS_LOCK:
+        dtd.MISSING_INSTALL_JOBS[job_id] = {
+            "job_id": job_id,
+            "status": "running",
+            "targets": ["node-a"],
+            "total_targets": 1,
+            "completed_targets": 0,
+            "failed_targets": 0,
+            "current_target": "node-a",
+            "progress_percent": 0.0,
+            "results": [],
+            "updated_at": 1.0,
+            "started_at": 1.0,
+        }
+
+    fake_request = types.SimpleNamespace(match_info={"job_id": job_id})
+    response = asyncio.run(dtd.get_missing_nodes_install_progress(fake_request))
+    payload = json.loads(response.text)
+    assert response.status == 200
+    assert payload["status"] == "running"
+    assert payload["current_target"] == "node-a"
+
+
+def test_run_missing_nodes_install_job_completed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    job_id = "install_completed_job"
+    targets = ["node-a", "node-b"]
+    with dtd.MISSING_INSTALL_JOBS_LOCK:
+        dtd.MISSING_INSTALL_JOBS[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "targets": list(targets),
+            "total_targets": len(targets),
+            "completed_targets": 0,
+            "failed_targets": 0,
+            "current_target": "",
+            "progress_percent": 0.0,
+            "results": [],
+            "updated_at": time.time(),
+            "started_at": time.time(),
+        }
+
+    monkeypatch.setattr(
+        dtd,
+        "_run_comfy_cli_command",
+        lambda _args: types.SimpleNamespace(returncode=0, stdout="ok", stderr=""),
+    )
+
+    dtd._run_missing_nodes_install_job(job_id, targets)
+    with dtd.MISSING_INSTALL_JOBS_LOCK:
+        job = dict(dtd.MISSING_INSTALL_JOBS[job_id])
+    assert job["status"] == "completed"
+    assert job["completed_targets"] == 2
+    assert job["failed_targets"] == 0
+    assert job["progress_percent"] == 100.0
+    assert len(job["results"]) == 2
+    assert all(entry["ok"] for entry in job["results"])
+
+
+def test_run_missing_nodes_install_job_partial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    job_id = "install_partial_job"
+    targets = ["node-a", "node-b"]
+    with dtd.MISSING_INSTALL_JOBS_LOCK:
+        dtd.MISSING_INSTALL_JOBS[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "targets": list(targets),
+            "total_targets": len(targets),
+            "completed_targets": 0,
+            "failed_targets": 0,
+            "current_target": "",
+            "progress_percent": 0.0,
+            "results": [],
+            "updated_at": time.time(),
+            "started_at": time.time(),
+        }
+
+    def _fake_run(args):
+        target = args[-1]
+        if target == "node-a":
+            return types.SimpleNamespace(returncode=0, stdout="ok", stderr="")
+        return types.SimpleNamespace(returncode=1, stdout="", stderr="boom")
+
+    monkeypatch.setattr(dtd, "_run_comfy_cli_command", _fake_run)
+
+    dtd._run_missing_nodes_install_job(job_id, targets)
+    with dtd.MISSING_INSTALL_JOBS_LOCK:
+        job = dict(dtd.MISSING_INSTALL_JOBS[job_id])
+    assert job["status"] == "partial"
+    assert job["completed_targets"] == 1
+    assert job["failed_targets"] == 1
+    assert job["progress_percent"] == 100.0
+
+
+def test_run_missing_nodes_install_job_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    job_id = "install_failed_job"
+    targets = ["node-a"]
+    with dtd.MISSING_INSTALL_JOBS_LOCK:
+        dtd.MISSING_INSTALL_JOBS[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "targets": list(targets),
+            "total_targets": len(targets),
+            "completed_targets": 0,
+            "failed_targets": 0,
+            "current_target": "",
+            "progress_percent": 0.0,
+            "results": [],
+            "updated_at": time.time(),
+            "started_at": time.time(),
+        }
+
+    monkeypatch.setattr(
+        dtd,
+        "_run_comfy_cli_command",
+        lambda _args: types.SimpleNamespace(returncode=1, stdout="", stderr="broken"),
+    )
+
+    dtd._run_missing_nodes_install_job(job_id, targets)
+    with dtd.MISSING_INSTALL_JOBS_LOCK:
+        job = dict(dtd.MISSING_INSTALL_JOBS[job_id])
+    assert job["status"] == "failed"
+    assert job["completed_targets"] == 0
+    assert job["failed_targets"] == 1
+    assert job["progress_percent"] == 100.0
