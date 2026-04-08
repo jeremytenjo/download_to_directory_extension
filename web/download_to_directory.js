@@ -670,6 +670,8 @@
       }
       #${DIALOG_ID} #dtd-missing-restart.visible {
         display: inline-flex;
+        align-items: center;
+        justify-content: center;
       }
       #${DIALOG_ID} #dtd-missing-restart:hover {
         background: var(--p-surface-700, #2c323d);
