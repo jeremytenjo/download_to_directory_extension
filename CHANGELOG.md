@@ -13,6 +13,7 @@ All notable changes to this extension are documented in this file.
 - Added successful missing-node installs to the Downloads accordion history.
 - Expanded `custom_nodes` git install detection to clone from repository page URLs (GitHub and Hugging Face, including `/tree/<branch>` links), not only `.git` URLs.
 - Improved auto-filename handling for direct download links (for example Civitai numeric model URLs) by using server `Content-Disposition` filenames when no filename override is provided.
+- Fixed false-positive unknown node classes caused by UUID-like internal IDs appearing in missing-node analysis/fallback detection.
 
 ## 2026-04-05
 

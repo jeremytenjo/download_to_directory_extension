@@ -788,6 +788,22 @@
     }
   }
 
+  function isIgnoredUnknownNodeName(raw) {
+    const value = String(raw || '').trim();
+    if (!value) return true;
+    if (
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        value,
+      )
+    ) {
+      return true;
+    }
+    if (/^[0-9a-f]{32}$/i.test(value)) {
+      return true;
+    }
+    return false;
+  }
+
   function collectMissingNodeTypesFromGraph() {
     try {
       const graphNodes = Array.isArray(window.app?.graph?._nodes)
@@ -805,6 +821,7 @@
         const typeName = String(node?.type || '').trim();
         if (!typeName) continue;
         if (virtualNodeTypes.has(typeName)) continue;
+        if (isIgnoredUnknownNodeName(typeName)) continue;
         if (!registeredTypes.has(typeName)) {
           missing.add(typeName);
         }
@@ -844,7 +861,7 @@
     });
     state.unknownNodes = unknown
       .map((item) => String(item || '').trim())
-      .filter(Boolean);
+      .filter((item) => item && !isIgnoredUnknownNodeName(item));
     updateMissingWarningVisibility();
     renderMissingNodesModalContent();
   }

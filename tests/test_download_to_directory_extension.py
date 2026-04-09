@@ -555,6 +555,38 @@ def test_analyze_workflow_missing_nodes_surfaces_cli_failure(
     assert "Missing-node analysis failed" in str(exc.value.reason)
 
 
+def test_should_ignore_unknown_node_name_filters_uuid_like_values() -> None:
+    assert dtd._should_ignore_unknown_node_name("916d8620-fefb-49c9-994b-8f0039c650a6")
+    assert dtd._should_ignore_unknown_node_name("916d8620fefb49c9994b8f0039c650a6")
+    assert not dtd._should_ignore_unknown_node_name("FaceDetailerPipe")
+
+
+def test_analyze_workflow_missing_nodes_filters_uuid_unknown_nodes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def _fake_run(args: list[str]):
+        output_index = args.index("--output") + 1
+        output_path = Path(args[output_index])
+        output_path.write_text(
+            json.dumps(
+                {
+                    "custom_nodes": {},
+                    "unknown_nodes": [
+                        "916d8620-fefb-49c9-994b-8f0039c650a6",
+                        "FaceDetailerPipe",
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(dtd, "_run_comfy_cli_command", _fake_run)
+
+    analyzed = dtd._analyze_workflow_missing_nodes({"nodes": []})
+    assert analyzed["unknown_nodes"] == ["FaceDetailerPipe"]
+
+
 def test_install_missing_nodes_endpoint_rejects_empty_targets() -> None:
     with pytest.raises(web.HTTPBadRequest):
         asyncio.run(dtd.install_missing_nodes(_FakeRequest({"targets": []})))

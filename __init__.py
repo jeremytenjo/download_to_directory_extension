@@ -663,6 +663,20 @@ def _display_name_from_source_url(source_url: str) -> str:
     return base or value
 
 
+def _should_ignore_unknown_node_name(node_name: str) -> bool:
+    value = str(node_name or "").strip()
+    if not value:
+        return True
+    if re.fullmatch(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        value,
+    ):
+        return True
+    if re.fullmatch(r"[0-9a-fA-F]{32}", value):
+        return True
+    return False
+
+
 def _analyze_workflow_missing_nodes(workflow: dict) -> dict:
     if not isinstance(workflow, dict):
         raise web.HTTPBadRequest(reason="`workflow` must be a JSON object")
@@ -742,6 +756,7 @@ def _analyze_workflow_missing_nodes(workflow: dict) -> dict:
                 str(node_name).strip()
                 for node_name in unknown_nodes_raw
                 if str(node_name).strip()
+                and not _should_ignore_unknown_node_name(str(node_name))
             }
         )
 
