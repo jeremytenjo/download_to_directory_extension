@@ -506,6 +506,26 @@ def test_build_restart_command_script_mode(
     assert cmd == ["/usr/bin/python3", "main.py", "--port", "8188"]
 
 
+def test_pkill_comfyui_processes_runs_expected_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+
+    def _fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(dtd.subprocess, "run", _fake_run)
+
+    dtd._pkill_comfyui_processes()
+
+    assert captured["cmd"] == ["pkill", "-f", "ComfyUI"]
+    assert captured["kwargs"]["check"] is False
+    assert captured["kwargs"]["capture_output"] is True
+    assert captured["kwargs"]["text"] is True
+
+
 def test_analyze_missing_nodes_endpoint_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

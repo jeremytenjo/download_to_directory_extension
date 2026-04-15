@@ -584,6 +584,20 @@ def _restart_comfyui_process() -> None:
     os.execv(sys.executable, cmd)
 
 
+def _pkill_comfyui_processes() -> None:
+    try:
+        subprocess.run(
+            ["pkill", "-f", "ComfyUI"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        logging.warning("download-to-dir restart: `pkill` is not available in this environment")
+    except Exception:
+        logging.exception("download-to-dir restart: `pkill -f ComfyUI` failed")
+
+
 def _install_clone_requirements_if_present(clone_target: str) -> None:
     requirements_path = os.path.join(clone_target, "requirements.txt")
     if not os.path.isfile(requirements_path):
@@ -1185,6 +1199,7 @@ async def restart_comfyui_from_extension(_request: web.Request) -> web.Response:
     def _restart_later():
         time.sleep(0.2)
         try:
+            _pkill_comfyui_processes()
             _restart_comfyui_process()
         except Exception:
             logging.exception("download-to-dir restart failed")
