@@ -1363,8 +1363,11 @@
     if (status === 400 && msg.includes('outside allowed comfyui roots')) {
       return 'That file is outside allowed ComfyUI roots and cannot be deleted.';
     }
+    if (status === 400 && msg.includes('outside custom_nodes')) {
+      return 'Only directories inside custom_nodes can be deleted.';
+    }
     if (status === 400 && msg.includes('directory')) {
-      return 'Only files can be deleted from history.';
+      return 'Directory deletion is only supported for custom_nodes entries.';
     }
     if (msg.includes('certificate verify failed')) {
       return 'Secure connection failed while validating the site certificate. Install/update certificates in your Python environment and try again.';
@@ -1575,6 +1578,88 @@
     );
   }
 
+  function normalizePathForCompare(value) {
+    return String(value || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  }
+
+  function looksLikeUrl(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return false;
+    if (/^git@[^:]+:.+/.test(raw)) return true;
+    try {
+      const parsed = new URL(raw);
+      return ['http:', 'https:'].includes(parsed.protocol);
+    } catch {
+      return false;
+    }
+  }
+
+  function isAbsolutePathLike(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return false;
+    return (
+      raw.startsWith('/') ||
+      raw.startsWith('\\\\') ||
+      /^[a-zA-Z]:[\\/]/.test(raw)
+    );
+  }
+
+  function isPathUnderCustomNodes(pathValue) {
+    const candidateRaw = String(pathValue || '').trim();
+    if (!candidateRaw || !isAbsolutePathLike(candidateRaw)) return false;
+    const candidate = normalizePathForCompare(candidateRaw);
+    const customRoots = state.roots
+      .filter((root) => /^custom_nodes(?:_\d+)?$/i.test(String(root?.key || '').trim()))
+      .map((root) => normalizePathForCompare(root?.path || ''))
+      .filter(Boolean);
+    if (customRoots.length > 0) {
+      return customRoots.some(
+        (rootPath) =>
+          candidate === rootPath || candidate.startsWith(`${rootPath}/`),
+      );
+    }
+    return candidate.includes('/custom_nodes/');
+  }
+
+  function getCustomNodeDiskPath(entry) {
+    const candidates = [
+      String(entry?.destination_path || '').trim(),
+      String(entry?.path || '').trim(),
+      String(getEntryPath(entry) || '').trim(),
+    ];
+    for (const candidate of candidates) {
+      if (!candidate || looksLikeUrl(candidate)) continue;
+      if (isPathUnderCustomNodes(candidate)) return candidate;
+    }
+    return '';
+  }
+
+  function getCustomNodeInstallTarget(entry) {
+    const sourceCandidates = [
+      String(entry?.url || '').trim(),
+      String(entry?.install_target || '').trim(),
+      String(entry?.source_url || '').trim(),
+      String(entry?.path || '').trim(),
+      String(entry?.destination_path || '').trim(),
+    ];
+    for (const candidate of sourceCandidates) {
+      if (!candidate) continue;
+      if (looksLikeUrl(candidate)) return candidate;
+      if (!isAbsolutePathLike(candidate) && !candidate.startsWith('.')) {
+        return candidate;
+      }
+    }
+    return '';
+  }
+
+  function canUpdateCustomNodeEntry(entry) {
+    return (
+      String(entry?.status || '').toLowerCase() === 'success' &&
+      Boolean(getCustomNodeDiskPath(entry)) &&
+      Boolean(getCustomNodeInstallTarget(entry))
+    );
+  }
+
   function inferDisplayNameFromEntry(entry) {
     if (String(entry?.operation || '').toLowerCase() === 'install') {
       if (entry?.file_name) return String(entry.file_name);
@@ -1743,6 +1828,14 @@
     actions.className = 'history-actions';
 
     if (entry.status === 'success' && entry.operation !== 'install') {
+      if (canUpdateCustomNodeEntry(entry)) {
+        const updateBtn = document.createElement('button');
+        updateBtn.type = 'button';
+        updateBtn.dataset.action = 'update-custom-node';
+        updateBtn.dataset.id = entry.id;
+        updateBtn.textContent = 'Update';
+        actions.appendChild(updateBtn);
+      }
       const deleteBtn = document.createElement('button');
       deleteBtn.type = 'button';
       deleteBtn.className = 'danger';
@@ -1751,6 +1844,14 @@
       deleteBtn.textContent = 'Delete from disk';
       actions.appendChild(deleteBtn);
     } else if (entry.status === 'success' && entry.operation === 'install') {
+      if (canUpdateCustomNodeEntry(entry)) {
+        const updateBtn = document.createElement('button');
+        updateBtn.type = 'button';
+        updateBtn.dataset.action = 'update-custom-node';
+        updateBtn.dataset.id = entry.id;
+        updateBtn.textContent = 'Update';
+        actions.appendChild(updateBtn);
+      }
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
       removeBtn.dataset.action = 'remove-entry';
@@ -1923,6 +2024,121 @@
         'File was already missing. Removed entry from history.',
         'success',
       );
+    }
+  }
+
+  async function updateCustomNodeFromHistory(entry) {
+    const customNodePath = getCustomNodeDiskPath(entry);
+    const installTarget = getCustomNodeInstallTarget(entry);
+    if (!customNodePath || !installTarget) {
+      setStatus('Update is only available for custom_nodes entries with a valid source URL.', 'error');
+      return;
+    }
+
+    const confirmed = await requestActionConfirmation({
+      title: 'Update custom node?',
+      copy: `${customNodePath}\n\nReinstall source: ${installTarget}`,
+      confirmLabel: 'Update',
+    });
+    if (!confirmed) return;
+
+    updateHistoryEntry(entry.id, {
+      created_at: Date.now(),
+      status: 'running',
+      error: '',
+      path: customNodePath,
+      destination_path: customNodePath,
+    });
+    setStatus(`Updating ${inferDisplayNameFromEntry(entry)}...`);
+
+    try {
+      const deleteResp = await apiFetch('/download-to-dir/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: customNodePath }),
+      });
+      const deleteData = await deleteResp.json().catch(() => ({}));
+      if (!deleteResp.ok) {
+        throw new Error(
+          formatApiError(deleteResp.status, deleteData, `Delete failed (${deleteResp.status})`),
+        );
+      }
+
+      state.installBusy = true;
+      state.installJobId = '';
+      state.installResults = [];
+      state.installProgress = {
+        status: 'queued',
+        total_targets: 1,
+        completed_targets: 0,
+        failed_targets: 0,
+        progress_percent: 0,
+        current_target: installTarget,
+        results: [],
+      };
+      renderMissingNodesModalContent();
+
+      const installResp = await apiFetch('/download-to-dir/missing-nodes/install', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ targets: [installTarget] }),
+      });
+      const installData = await installResp.json().catch(() => ({}));
+      if (!installResp.ok || !installData?.job_id) {
+        const reason =
+          String(installData?.reason || installData?.error || '')
+            .trim() || `Failed to start update install (${installResp.status})`;
+        throw new Error(reason);
+      }
+
+      state.installJobId = String(installData.job_id || '').trim();
+      applyInstallProgress({
+        ...(state.installProgress || {}),
+        ...installData,
+      });
+
+      const finalProgress = await waitForInstallJobCompletion(state.installJobId);
+      const finalStatus = String(finalProgress?.status || '').toLowerCase();
+      const failedCount = Number(finalProgress?.failed_targets || 0);
+      const firstError = String(
+        finalProgress?.results?.find?.((result) => !result?.ok)?.stderr || '',
+      ).trim();
+
+      if (finalStatus === 'completed') {
+        updateHistoryEntry(entry.id, {
+          status: 'success',
+          error: '',
+          url: installTarget,
+          path: customNodePath,
+          destination_path: customNodePath,
+        });
+        setStatus(`Updated ${inferDisplayNameFromEntry(entry)}. Restart ComfyUI if needed.`, 'success');
+      } else {
+        const reason = firstError || `Update failed (${failedCount} target(s) failed).`;
+        updateHistoryEntry(entry.id, {
+          status: 'failed',
+          error: reason,
+          path: customNodePath,
+          destination_path: customNodePath,
+        });
+        setStatus(reason, 'error');
+      }
+    } catch (err) {
+      const message = err?.message || String(err);
+      updateHistoryEntry(entry.id, {
+        status: 'failed',
+        error: message,
+        path: customNodePath,
+        destination_path: customNodePath,
+      });
+      setStatus(message, 'error');
+    } finally {
+      clearInstallPollTimer();
+      state.installBusy = false;
+      renderMissingNodesModalContent();
     }
   }
 
@@ -2744,6 +2960,13 @@
 
         if (action === 'delete-file') {
           deleteFileFromHistory(entry).catch((err) => {
+            setStatus(err.message || String(err), 'error');
+          });
+          return;
+        }
+
+        if (action === 'update-custom-node') {
+          updateCustomNodeFromHistory(entry).catch((err) => {
             setStatus(err.message || String(err), 'error');
           });
         }

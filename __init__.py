@@ -90,7 +90,7 @@ def _build_root_map() -> dict[str, str]:
 
     _add_subroots(roots, "models", folder_paths.models_dir)
 
-    for index, custom_nodes_dir in enumerate(folder_paths.get_folder_paths("custom_nodes")):
+    for index, custom_nodes_dir in enumerate(_custom_nodes_roots()):
         key_prefix = "custom_nodes" if index == 0 else f"custom_nodes_{index + 1}"
         roots[key_prefix] = os.path.abspath(custom_nodes_dir)
 
@@ -119,6 +119,14 @@ def _safe_path_from_root(root_path: str, relative_path: str) -> str:
 
 def _is_within_any_root(candidate_path: str, allowed_roots: list[str]) -> bool:
     return any(_is_within_root(candidate_path, root) for root in allowed_roots)
+
+
+def _custom_nodes_roots() -> list[str]:
+    return [
+        os.path.abspath(path)
+        for path in folder_paths.get_folder_paths("custom_nodes")
+        if str(path or "").strip()
+    ]
 
 
 def _sanitize_filename(name: str) -> str:
@@ -436,11 +444,7 @@ def _prepare_download_request(body: dict) -> dict:
     os.makedirs(target_dir, exist_ok=True)
 
     def _is_custom_nodes_target(path: str) -> bool:
-        custom_nodes_roots = [
-            os.path.abspath(p)
-            for p in folder_paths.get_folder_paths("custom_nodes")
-        ]
-        return any(_is_within_root(path, custom_root) for custom_root in custom_nodes_roots)
+        return any(_is_within_root(path, custom_root) for custom_root in _custom_nodes_roots())
 
     repo_clone_spec = _extract_repo_clone_spec(download_url)
     if repo_clone_spec and _is_custom_nodes_target(target_dir):
@@ -526,7 +530,7 @@ def _prepare_upload_request(body: dict, uploaded_filename: str) -> dict:
     }
 
 
-def _resolve_deletable_path(path_value: str, roots: dict[str, str]) -> str:
+def _resolve_deletable_path(path_value: str, roots: dict[str, str]) -> tuple[str, bool]:
     candidate = str(path_value or "").strip()
     if not candidate:
         raise web.HTTPBadRequest(reason="Missing required field: path")
@@ -535,9 +539,12 @@ def _resolve_deletable_path(path_value: str, roots: dict[str, str]) -> str:
     allowed_roots = [path for path in roots.values() if path]
     if not _is_within_any_root(delete_path, allowed_roots):
         raise web.HTTPBadRequest(reason="Requested path is outside allowed ComfyUI roots")
-    if os.path.isdir(delete_path):
-        raise web.HTTPBadRequest(reason="Path points to a directory; only files can be deleted")
-    return delete_path
+    is_directory = os.path.isdir(delete_path)
+    if is_directory and not _is_within_any_root(delete_path, _custom_nodes_roots()):
+        raise web.HTTPBadRequest(
+            reason="Path points to a directory outside custom_nodes; only custom_nodes directories can be deleted"
+        )
+    return delete_path, is_directory
 
 
 def _prune_old_jobs() -> None:
@@ -1056,12 +1063,15 @@ async def get_download_progress(request: web.Request) -> web.Response:
 async def delete_downloaded_file(request: web.Request) -> web.Response:
     body = await request.json()
     roots = _build_root_map()
-    delete_path = _resolve_deletable_path(body.get("path", ""), roots)
+    delete_path, is_directory = _resolve_deletable_path(body.get("path", ""), roots)
 
     deleted = False
     try:
         if os.path.exists(delete_path):
-            os.remove(delete_path)
+            if is_directory:
+                shutil.rmtree(delete_path)
+            else:
+                os.remove(delete_path)
             deleted = True
     except FileNotFoundError:
         deleted = False

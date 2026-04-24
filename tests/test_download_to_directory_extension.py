@@ -298,6 +298,65 @@ def test_delete_downloaded_file_rejects_path_outside_roots(
         )
 
 
+def test_delete_downloaded_file_allows_custom_nodes_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    comfy_root = tmp_path / "comfy"
+    custom_nodes_dir = comfy_root / "custom_nodes"
+    custom_nodes_dir.mkdir(parents=True, exist_ok=True)
+    target_dir = custom_nodes_dir / "example-node"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "README.md").write_text("ok", encoding="utf-8")
+
+    roots = {
+        "input": str(comfy_root / "input"),
+        "output": str(comfy_root / "output"),
+        "user": str(comfy_root / "user"),
+        "comfy_root": str(comfy_root),
+        "custom_nodes": str(custom_nodes_dir),
+    }
+    for path in roots.values():
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(dtd, "_build_root_map", lambda: roots)
+    monkeypatch.setattr(dtd, "_custom_nodes_roots", lambda: [str(custom_nodes_dir)])
+
+    response = asyncio.run(
+        dtd.delete_downloaded_file(_FakeRequest({"path": str(target_dir)}))
+    )
+    payload = json.loads(response.text)
+    assert payload["ok"] is True
+    assert payload["deleted"] is True
+    assert target_dir.exists() is False
+
+
+def test_delete_downloaded_file_rejects_non_custom_nodes_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    comfy_root = tmp_path / "comfy"
+    user_dir = comfy_root / "user"
+    user_dir.mkdir(parents=True, exist_ok=True)
+    target_dir = user_dir / "models"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    roots = {
+        "input": str(comfy_root / "input"),
+        "output": str(comfy_root / "output"),
+        "user": str(user_dir),
+        "comfy_root": str(comfy_root),
+    }
+    for path in roots.values():
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(dtd, "_build_root_map", lambda: roots)
+    monkeypatch.setattr(dtd, "_custom_nodes_roots", lambda: [str(comfy_root / "custom_nodes")])
+
+    with pytest.raises(web.HTTPBadRequest):
+        asyncio.run(
+            dtd.delete_downloaded_file(_FakeRequest({"path": str(target_dir)}))
+        )
+
+
 def test_prepare_upload_request_uses_uploaded_filename(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
