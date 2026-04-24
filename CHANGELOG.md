@@ -2,6 +2,11 @@
 
 All notable changes to this extension are documented in this file.
 
+## 2026-04-24
+
+- Added an `Update` action in Downloads history for custom node entries that removes the installed node from disk and reinstalls it.
+- Updated delete handling to allow directory deletion only inside `custom_nodes`, which enables safe custom-node update/reinstall flow while keeping other directories protected.
+
 ## 2026-04-08
 
 - Added missing custom-node detection for the currently open workflow.
