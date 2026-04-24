@@ -834,7 +834,9 @@
   }
 
   function normalizeMissingState(raw) {
-    const value = String(raw || '').trim().toLowerCase();
+    const value = String(raw || '')
+      .trim()
+      .toLowerCase();
     if (!value) return 'unknown';
     return value;
   }
@@ -848,15 +850,16 @@
     state.missingNodes = missing.map((entry) => {
       const sourceUrl = String(entry?.source_url || '').trim();
       const displayName = String(entry?.display_name || '').trim() || 'unknown';
-      const key =
-        String(entry?.key || '').trim() || sourceUrl || displayName;
+      const key = String(entry?.key || '').trim() || sourceUrl || displayName;
       return {
         key,
         display_name: displayName,
         source_url: sourceUrl,
         state: normalizeMissingState(entry?.state),
         install_target:
-          String(entry?.install_target || '').trim() || sourceUrl || displayName,
+          String(entry?.install_target || '').trim() ||
+          sourceUrl ||
+          displayName,
       };
     });
     state.unknownNodes = unknown
@@ -973,7 +976,8 @@
     `;
 
     if (installButton) {
-      const canInstall = buildMissingInstallTargets().length > 0 && !state.installBusy;
+      const canInstall =
+        buildMissingInstallTargets().length > 0 && !state.installBusy;
       installButton.disabled = !canInstall;
       installButton.textContent = state.installBusy
         ? 'Installing...'
@@ -993,7 +997,8 @@
     const installButton = document.getElementById('dtd-missing-install');
     const restartButton = document.getElementById('dtd-missing-restart');
     if (installButton) {
-      const canInstall = buildMissingInstallTargets().length > 0 && !state.installBusy;
+      const canInstall =
+        buildMissingInstallTargets().length > 0 && !state.installBusy;
       installButton.disabled = !canInstall;
       installButton.textContent = state.installBusy
         ? 'Installing...'
@@ -1061,8 +1066,11 @@
   }
 
   function applyInstallProgress(progress) {
-    state.installProgress = progress && typeof progress === 'object' ? progress : null;
-    state.installResults = Array.isArray(progress?.results) ? progress.results : [];
+    state.installProgress =
+      progress && typeof progress === 'object' ? progress : null;
+    state.installResults = Array.isArray(progress?.results)
+      ? progress.results
+      : [];
     state.installBusy = !isTerminalInstallStatus(progress?.status);
     renderMissingNodesModalContent();
   }
@@ -1090,22 +1098,23 @@
 
     state.missingCheckBusy = true;
     try {
-      const response = await apiFetch('/download-to-dir/missing-nodes/analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
+      const response = await apiFetch(
+        '/download-to-dir/missing-nodes/analyze',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ workflow }),
         },
-        body: JSON.stringify({ workflow }),
-      });
+      );
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         const reason =
-          String(data?.reason || data?.error || data?.stderr || '')
-            .trim() || `Failed to analyze workflow dependencies (${response.status})`;
-        throw new Error(
-          reason,
-        );
+          String(data?.reason || data?.error || data?.stderr || '').trim() ||
+          `Failed to analyze workflow dependencies (${response.status})`;
+        throw new Error(reason);
       }
       setMissingNodeData(data);
       if (state.missingNodes.length === 0 && state.unknownNodes.length === 0) {
@@ -1146,7 +1155,9 @@
 
     for (const unknownName of state.unknownNodes) {
       const key = `unknown:${unknownName}`;
-      const manualSource = String(state.manualSourceOverrides[key] || '').trim();
+      const manualSource = String(
+        state.manualSourceOverrides[key] || '',
+      ).trim();
       if (!manualSource || seen.has(manualSource)) continue;
       seen.add(manualSource);
       targets.push(manualSource);
@@ -1181,19 +1192,22 @@
     renderMissingNodesModalContent();
     setStatus(`Installing ${targets.length} missing node(s)...`);
     try {
-      const response = await apiFetch('/download-to-dir/missing-nodes/install', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
+      const response = await apiFetch(
+        '/download-to-dir/missing-nodes/install',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ targets }),
         },
-        body: JSON.stringify({ targets }),
-      });
+      );
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data?.job_id) {
         const reason =
-          String(data?.reason || data?.error || '')
-            .trim() || `Failed to start missing-node install (${response.status})`;
+          String(data?.reason || data?.error || '').trim() ||
+          `Failed to start missing-node install (${response.status})`;
         throw new Error(reason);
       }
       state.installJobId = String(data.job_id || '').trim();
@@ -1202,7 +1216,9 @@
         ...data,
       });
 
-      const finalProgress = await waitForInstallJobCompletion(state.installJobId);
+      const finalProgress = await waitForInstallJobCompletion(
+        state.installJobId,
+      );
       const finalStatus = String(finalProgress?.status || '').toLowerCase();
       const installed = Number(finalProgress?.completed_targets || 0);
       const failed = Number(finalProgress?.failed_targets || 0);
@@ -1218,13 +1234,17 @@
           'error',
         );
       } else if (finalStatus === 'completed') {
-        setStatus(`Installed ${installed} missing node(s). Click Restart in this modal.`, 'success');
+        setStatus(
+          `Installed ${installed} missing node(s). Click Restart in this modal.`,
+          'success',
+        );
       } else {
         const firstError = String(
           finalProgress?.results?.find?.((entry) => !entry?.ok)?.stderr || '',
         ).trim();
         setStatus(
-          firstError || `Failed to install missing nodes. ${failed} target(s) failed.`,
+          firstError ||
+            `Failed to install missing nodes. ${failed} target(s) failed.`,
           'error',
         );
       }
@@ -1579,7 +1599,10 @@
   }
 
   function normalizePathForCompare(value) {
-    return String(value || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+    return String(value || '')
+      .replace(/\\/g, '/')
+      .replace(/\/+$/, '')
+      .toLowerCase();
   }
 
   function looksLikeUrl(value) {
@@ -1609,7 +1632,9 @@
     if (!candidateRaw || !isAbsolutePathLike(candidateRaw)) return false;
     const candidate = normalizePathForCompare(candidateRaw);
     const customRoots = state.roots
-      .filter((root) => /^custom_nodes(?:_\d+)?$/i.test(String(root?.key || '').trim()))
+      .filter((root) =>
+        /^custom_nodes(?:_\d+)?$/i.test(String(root?.key || '').trim()),
+      )
       .map((root) => normalizePathForCompare(root?.path || ''))
       .filter(Boolean);
     if (customRoots.length > 0) {
@@ -1663,7 +1688,9 @@
   function inferDisplayNameFromEntry(entry) {
     if (String(entry?.operation || '').toLowerCase() === 'install') {
       if (entry?.file_name) return String(entry.file_name);
-      const installTarget = String(entry?.destination_path || entry?.path || '').trim();
+      const installTarget = String(
+        entry?.destination_path || entry?.path || '',
+      ).trim();
       if (installTarget) {
         const base = installTarget.split('/').pop() || installTarget;
         return base.toLowerCase().endsWith('.git') ? base.slice(0, -4) : base;
@@ -1822,7 +1849,8 @@
     const error = document.createElement('div');
     error.className = 'history-error';
     error.hidden = !(entry.status === 'failed' && entry.error);
-    error.textContent = entry.status === 'failed' ? String(entry.error || '') : '';
+    error.textContent =
+      entry.status === 'failed' ? String(entry.error || '') : '';
 
     const actions = document.createElement('div');
     actions.className = 'history-actions';
@@ -2031,7 +2059,10 @@
     const customNodePath = getCustomNodeDiskPath(entry);
     const installTarget = getCustomNodeInstallTarget(entry);
     if (!customNodePath || !installTarget) {
-      setStatus('Update is only available for custom_nodes entries with a valid source URL.', 'error');
+      setStatus(
+        'Update is only available for custom_nodes entries with a valid source URL.',
+        'error',
+      );
       return;
     }
 
@@ -2060,7 +2091,11 @@
       const deleteData = await deleteResp.json().catch(() => ({}));
       if (!deleteResp.ok) {
         throw new Error(
-          formatApiError(deleteResp.status, deleteData, `Delete failed (${deleteResp.status})`),
+          formatApiError(
+            deleteResp.status,
+            deleteData,
+            `Delete failed (${deleteResp.status})`,
+          ),
         );
       }
 
@@ -2078,19 +2113,22 @@
       };
       renderMissingNodesModalContent();
 
-      const installResp = await apiFetch('/download-to-dir/missing-nodes/install', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
+      const installResp = await apiFetch(
+        '/download-to-dir/missing-nodes/install',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ targets: [installTarget] }),
         },
-        body: JSON.stringify({ targets: [installTarget] }),
-      });
+      );
       const installData = await installResp.json().catch(() => ({}));
       if (!installResp.ok || !installData?.job_id) {
         const reason =
-          String(installData?.reason || installData?.error || '')
-            .trim() || `Failed to start update install (${installResp.status})`;
+          String(installData?.reason || installData?.error || '').trim() ||
+          `Failed to start update install (${installResp.status})`;
         throw new Error(reason);
       }
 
@@ -2100,7 +2138,9 @@
         ...installData,
       });
 
-      const finalProgress = await waitForInstallJobCompletion(state.installJobId);
+      const finalProgress = await waitForInstallJobCompletion(
+        state.installJobId,
+      );
       const finalStatus = String(finalProgress?.status || '').toLowerCase();
       const failedCount = Number(finalProgress?.failed_targets || 0);
       const firstError = String(
@@ -2115,9 +2155,13 @@
           path: customNodePath,
           destination_path: customNodePath,
         });
-        setStatus(`Updated ${inferDisplayNameFromEntry(entry)}. Restart ComfyUI if needed.`, 'success');
+        setStatus(
+          `Updated ${inferDisplayNameFromEntry(entry)}. Restart ComfyUI if needed.`,
+          'success',
+        );
       } else {
-        const reason = firstError || `Update failed (${failedCount} target(s) failed).`;
+        const reason =
+          firstError || `Update failed (${failedCount} target(s) failed).`;
         updateHistoryEntry(entry.id, {
           status: 'failed',
           error: reason,
@@ -2543,7 +2587,8 @@
     const titleEl = document.getElementById('dtd-confirm-title');
     const copyEl = document.getElementById('dtd-confirm-copy');
     const confirmEl = document.getElementById('dtd-confirm-confirm');
-    if (titleEl) titleEl.textContent = String(title || '').trim() || 'Are you sure?';
+    if (titleEl)
+      titleEl.textContent = String(title || '').trim() || 'Are you sure?';
     if (copyEl) copyEl.textContent = String(copy || '').trim();
     if (confirmEl) {
       confirmEl.textContent = String(confirmLabel || '').trim() || 'Confirm';
@@ -2574,10 +2619,7 @@
     try {
       const response = await callRestartEndpoint();
       if (!response || response.status === 404) {
-        setStatus(
-          'Restart endpoint is unavailable.',
-          'error',
-        );
+        setStatus('Restart endpoint is unavailable.', 'error');
         return;
       }
       if (response.status === 403) {
@@ -2592,10 +2634,7 @@
         return;
       }
 
-      setStatus(
-        'Restart requested. Waiting for reconnect...',
-        'success',
-      );
+      setStatus('Restart requested. Waiting for reconnect...', 'success');
 
       const apiObj = window.api;
       let finished = false;
@@ -2626,11 +2665,15 @@
         };
         apiObj.addEventListener('reconnected', onReconnected);
         window.setTimeout(() => {
-          finish('Restart complete. If the UI did not refresh yet, wait a moment or refresh the page.');
+          finish(
+            'Restart complete. If the UI did not refresh yet, wait a moment or refresh the page.',
+          );
         }, 7000);
       } else {
         window.setTimeout(() => {
-          finish('Restart complete. If the UI did not refresh yet, wait a moment or refresh the page.');
+          finish(
+            'Restart complete. If the UI did not refresh yet, wait a moment or refresh the page.',
+          );
         }, 2500);
       }
     } catch (err) {
@@ -2689,7 +2732,6 @@
       setStatus('Ready.');
     }
   }
-
 
   async function triggerNodeDefinitionsRefresh() {
     const commandId = 'Comfy.RefreshNodeDefinitions';
@@ -3051,7 +3093,9 @@
       missingModal.addEventListener('input', (event) => {
         const input =
           event.target instanceof Element
-            ? event.target.closest('input[data-action="manual-source"][data-key]')
+            ? event.target.closest(
+                'input[data-action="manual-source"][data-key]',
+              )
             : null;
         if (!(input instanceof HTMLInputElement)) return;
         const key = String(input.dataset.key || '').trim();

@@ -312,7 +312,7 @@ def _download_file(
     parsed_url = urllib.parse.urlparse(download_url)
     host = (parsed_url.hostname or "").lower()
     headers = {
-        "User-Agent": "ComfyUI-DirectoryDownloader/1.0",
+        "User-Agent": "ComfyUI-Downloader/1.0",
     }
     # Allow authenticated downloads for gated HF models when users provide a token.
     if (

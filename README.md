@@ -1,8 +1,9 @@
-# Download To Directory (ComfyUI extension)
+# comfyui-downloader
 
 Download files from HTTP/HTTPS URLs directly into selected ComfyUI folders, with progress tracking and safer path handling.
 
 ## Features
+
 - Toolbar button + modal downloader UI.
 - Async downloads with live progress.
 - Human-friendly error messages.
@@ -14,30 +15,34 @@ Download files from HTTP/HTTPS URLs directly into selected ComfyUI folders, with
 - Advanced accordion state persisted per browser session.
 
 ## Safety defaults
+
 - Only `http` / `https` URLs are allowed.
 - Path traversal is blocked (`..` and escaping root).
 
 ## Install
+
 Clone into `ComfyUI/custom_nodes/`:
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone <your-repo-url> download_to_directory_extension
+git clone <your-repo-url> comfyui-downloader
 ```
 
 Install optional dependency:
 
 ```bash
-pip install -r custom_nodes/download_to_directory_extension/requirements.txt
+pip install -r custom_nodes/comfyui-downloader/requirements.txt
 ```
 
 Restart ComfyUI.
 
 ## Notes
+
 - TLS certificate failures use a `certifi` fallback when available.
 - On successful download, the extension attempts to refresh node definitions using the same command path as pressing `R`.
 
 ## Manual Verification Checklist
+
 - Advanced accordion open/closed state persists after modal close/reopen and page refresh in the same browser session.
 - Advanced accordion state resets after ending the browser session.
 - Successful download adds a history item with `Delete from disk` and `Remove`.
