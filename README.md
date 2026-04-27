@@ -1,4 +1,4 @@
-# comfyui-downloader
+# ComfyUI-Downloader
 
 Download files from HTTP/HTTPS URLs directly into selected ComfyUI folders, with progress tracking and safer path handling.
 
@@ -25,13 +25,13 @@ Clone into `ComfyUI/custom_nodes/`:
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone <your-repo-url> comfyui-downloader
+git clone <your-repo-url> ComfyUI-Downloader
 ```
 
 Install optional dependency:
 
 ```bash
-pip install -r custom_nodes/comfyui-downloader/requirements.txt
+pip install -r custom_nodes/ComfyUI-Downloader/requirements.txt
 ```
 
 Restart ComfyUI.

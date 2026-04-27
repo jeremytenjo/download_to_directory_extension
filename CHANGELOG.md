@@ -4,7 +4,7 @@ All notable changes to this extension are documented in this file.
 
 ## 2026-04-24
 
-- Renamed the project branding to `comfyui-downloader` across docs and UI labels.
+- Renamed the project branding to `ComfyUI-Downloader` across docs and UI labels.
 - Added an `Update` action in Downloads history for custom node entries that removes the installed node from disk and reinstalls it.
 - Updated delete handling to allow directory deletion only inside `custom_nodes`, which enables safe custom-node update/reinstall flow while keeping other directories protected.
 
