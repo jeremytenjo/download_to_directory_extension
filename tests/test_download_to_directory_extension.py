@@ -515,6 +515,28 @@ def test_install_clone_requirements_if_present_raises_on_pip_failure(
         dtd._install_clone_requirements_if_present(str(tmp_path))
 
 
+def test_install_clone_requirements_if_present_sanitizes_multiline_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def _fake_run(*_args, **_kwargs):
+        return types.SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="line one\nline two\r\nline three",
+        )
+
+    monkeypatch.setattr(dtd.os.path, "isfile", lambda _path: True)
+    monkeypatch.setattr(dtd.subprocess, "run", _fake_run)
+
+    with pytest.raises(web.HTTPBadRequest) as exc:
+        dtd._install_clone_requirements_if_present(str(tmp_path))
+
+    reason = str(exc.value.reason or "")
+    assert "\n" not in reason
+    assert "\r" not in reason
+    assert "line one line two line three" in reason
+
+
 def test_install_clone_requirements_if_present_retries_with_python3_when_pip_missing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

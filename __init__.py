@@ -33,6 +33,13 @@ MISSING_INSTALL_JOBS: dict[str, dict] = {}
 MISSING_INSTALL_JOBS_LOCK = threading.Lock()
 
 
+def _sanitize_http_reason(reason: object, fallback: str = "Request failed") -> str:
+    text = str(reason or "")
+    text = text.replace("\r", " ").replace("\n", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text or fallback
+
+
 def _is_hot_reload_enabled() -> bool:
     value = os.environ.get(HOT_RELOAD_ENV_VAR, "").strip().lower()
     return value in {"1", "true", "yes", "on"}
@@ -397,7 +404,10 @@ def _download_file(
                 )
             ) from exc
         raise web.HTTPBadRequest(
-            reason=f"Download failed with HTTP {exc.code} ({exc.reason})"
+            reason=_sanitize_http_reason(
+                f"Download failed with HTTP {exc.code} ({exc.reason})",
+                fallback=f"Download failed with HTTP {exc.code}",
+            )
         ) from exc
     except Exception:
         if tmp_file_path and os.path.exists(tmp_file_path):
@@ -651,12 +661,22 @@ def _install_clone_requirements_if_present(clone_target: str) -> None:
         stderr = (fallback_result.stderr or "").strip()
         stdout = (fallback_result.stdout or "").strip()
         detail = stderr or stdout or "pip install failed"
-        raise web.HTTPBadRequest(reason=f"Dependency install failed: {detail}")
+        raise web.HTTPBadRequest(
+            reason=_sanitize_http_reason(
+                f"Dependency install failed: {detail}",
+                fallback="Dependency install failed",
+            )
+        )
 
     stderr = (result.stderr or "").strip()
     stdout = (result.stdout or "").strip()
     detail = stderr or stdout or "pip install failed"
-    raise web.HTTPBadRequest(reason=f"Dependency install failed: {detail}")
+    raise web.HTTPBadRequest(
+        reason=_sanitize_http_reason(
+            f"Dependency install failed: {detail}",
+            fallback="Dependency install failed",
+        )
+    )
 
 
 def _run_comfy_cli_command(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -729,18 +749,38 @@ def _analyze_workflow_missing_nodes(workflow: dict) -> dict:
         )
         if result.returncode != 0:
             detail = (result.stderr or "").strip() or (result.stdout or "").strip() or "deps-in-workflow failed"
-            raise web.HTTPInternalServerError(reason=f"Missing-node analysis failed: {detail}")
+            raise web.HTTPInternalServerError(
+                reason=_sanitize_http_reason(
+                    f"Missing-node analysis failed: {detail}",
+                    fallback="Missing-node analysis failed",
+                )
+            )
 
         with open(deps_tmp, "r", encoding="utf-8") as handle:
             deps = json.load(handle)
     except web.HTTPException:
         raise
     except FileNotFoundError as exc:
-        raise web.HTTPInternalServerError(reason=f"Dependency analysis output missing: {exc}") from exc
+        raise web.HTTPInternalServerError(
+            reason=_sanitize_http_reason(
+                f"Dependency analysis output missing: {exc}",
+                fallback="Dependency analysis output missing",
+            )
+        ) from exc
     except json.JSONDecodeError as exc:
-        raise web.HTTPInternalServerError(reason=f"Failed to parse dependency analysis output: {exc}") from exc
+        raise web.HTTPInternalServerError(
+            reason=_sanitize_http_reason(
+                f"Failed to parse dependency analysis output: {exc}",
+                fallback="Failed to parse dependency analysis output",
+            )
+        ) from exc
     except Exception as exc:
-        raise web.HTTPInternalServerError(reason=f"Missing-node analysis failed: {exc}") from exc
+        raise web.HTTPInternalServerError(
+            reason=_sanitize_http_reason(
+                f"Missing-node analysis failed: {exc}",
+                fallback="Missing-node analysis failed",
+            )
+        ) from exc
     finally:
         for path in (workflow_tmp, deps_tmp):
             if path and os.path.exists(path):
@@ -935,7 +975,12 @@ def _run_download_job(
                 stderr = (result.stderr or "").strip()
                 stdout = (result.stdout or "").strip()
                 detail = stderr or stdout or "git clone failed"
-                raise web.HTTPBadRequest(reason=f"Git clone failed: {detail}")
+                raise web.HTTPBadRequest(
+                    reason=_sanitize_http_reason(
+                        f"Git clone failed: {detail}",
+                        fallback="Git clone failed",
+                    )
+                )
 
             _install_clone_requirements_if_present(clone_target)
             bytes_written, total_bytes = 0, None
@@ -1076,7 +1121,12 @@ async def delete_downloaded_file(request: web.Request) -> web.Response:
     except FileNotFoundError:
         deleted = False
     except OSError as exc:
-        raise web.HTTPInternalServerError(reason=f"Failed to delete file: {exc}")
+        raise web.HTTPInternalServerError(
+            reason=_sanitize_http_reason(
+                f"Failed to delete file: {exc}",
+                fallback="Failed to delete file",
+            )
+        )
 
     return web.json_response({"ok": True, "deleted": deleted, "path": delete_path})
 
